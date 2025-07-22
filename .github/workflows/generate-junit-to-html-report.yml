@@ -1,0 +1,64 @@
+# .github/workflows/generate-test-report.yml
+name: JUnit to HTML Report Generation
+
+on:
+  workflow_call:
+    inputs:
+      # test_report_dir:
+      #   required: true
+      #   type: string
+      #   description: Directory containing JUnit XML test reports.
+      report_header:
+        required: false
+        type: string
+        default: Cross-Platform Test
+        description: Header for the generated HTML report.
+      output_file:
+        required: false
+        type: string
+        default: cross_platform_report.html
+        description: Path to save the generated HTML report.
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: Open-CMSIS-Pack/workflows-and-actions-collection
+          path: 'workflows-and-actions-collection'
+          ref: 'base-structure'
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+
+      - name: Download test results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts/
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas
+
+      - name: list directories
+        run: |
+          echo "Listing directories in artifacts:"
+          ls -R ./
+
+      - name: Run test report generator
+        run: |
+          python workflows-and-actions-collection/scripts/generate_junit_to_html_report.py \
+            --test_report_dir artifacts \
+            --report_header "${{ inputs.report_header }}" \
+            --output_file "{{ inputs.output_file }}"
+
+      - name: Upload HTML report as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: html-test-report
+          path: ${{ inputs.output_file }}
