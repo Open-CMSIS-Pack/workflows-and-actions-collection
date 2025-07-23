@@ -95,9 +95,60 @@ jobs:
             echo "config_path=${{ env.CALLER_DIR }}/${{ inputs.link-check-config }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: list files to check
+        working-directory: ${{ env.CALLER_DIR }}
+        run: |
+          ls -l
+
+      - name: Upload test files as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: TEST-FILE
+          path: ${{ env.CALLER_DIR }}/CONTRIBUTING.md
+
       - name: Check markdown links
-        uses: tcort/github-action-markdown-link-check@a800ad5f1c35bf61987946fd31c15726a1c9f2ba # v1.1.0
+        id: markdown-link-check
+        uses: gaurav-nelson/github-action-markdown-link-check@1.0.15
         with:
           use-quiet-mode: 'no'
           use-verbose-mode: 'yes'
           config-file: ${{ steps.link-config-path.outputs.config_path }}
+
+      - name: display errors
+        run: |
+          echo "${{ steps.markdown-link-check.outputs.MLC_OUTPUT }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+
+      - name: Install markdown-link-check
+        run: npm install -g markdown-link-check
+
+      - name: Find and check all Markdown files
+        run: |
+          set -e
+          echo "Checking markdown files recursively..."
+          md_files=$(find . -name "*.md")
+          if [ -z "$md_files" ]; then
+            echo "⚠️ No Markdown files found."
+            exit 1
+          fi
+
+          failed=0
+          for file in $md_files; do
+            echo "📄 Checking $file"
+            if ! markdown-link-check "$file" --verbose; then
+              echo "❌ Broken links found in $file"
+              failed=1
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "🛑 Broken links detected in one or more Markdown files"
+            exit 1
+          else
+            echo "✅ All links are valid"
+          fi
+
