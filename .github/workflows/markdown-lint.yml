@@ -1,4 +1,4 @@
-name: markdown
+name: Markdown
 
 on:
   workflow_call:
@@ -20,8 +20,8 @@ on:
           Comma or space separated list of file paths or glob patterns to ignore
           when running markdownlint (e.g. 'docs/*.md,README.md').
 env:
-  CALLER_DIR: 'caller-repository'  # This is the directory where the workflow is called from, used to determine
-  WORKFLOW_DIR: 'workflows-and-actions-collection'  # This is the directory where the workflow files are located.
+  CALLER_DIR: 'caller-repository'
+  WORKFLOW_DIR: 'workflows-and-actions-collection'
 
 jobs:
   lint:
