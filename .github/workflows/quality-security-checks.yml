@@ -2,23 +2,7 @@ name: Quality and Security Checks
 
 on:
   workflow_call:
-    # inputs:
-    #   lint-config:
-    #     type: string
-    #     required: false
-    #     default: 'configs/md_lint_config.yml'
-    #     description: Path to markdownlint config file (JSON, JSONC, or YML).
-    #   link-check-config:
-    #     type: string
-    #     required: false
-    #     default: 'configs/mlc_config.json'
-    #     description: Path to markdown link check config file (JSON).
-    #   ignore-files:
-    #     type: string
-    #     required: false
-    #     description: |
-    #       Comma or space separated list of file paths or glob patterns to ignore
-    #       when running markdownlint (e.g. 'docs/*.md,README.md').
+
 env:
   CALLER_DIR: 'caller-repository'
   WORKFLOW_DIR: 'workflows-and-actions-collection'
