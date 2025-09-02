@@ -3,10 +3,11 @@
 A collection of reusable GitHub Actions and workflow templates for the Open‑CMSIS‑Pack ecosystem to automate CI/CD
 pipelines, enforce quality standards, and streamline DevOps processes across repositories.
 
-| Workflow File | Description | Where it is used |
-|---------------|-------------|------------------|
-| `markdown-lint.yml` | A CI for linting markdown files. | `generator-bridge` |
-| `generate-junit-to-html-report.yml` | A CI for consolidating JUNIT XML test reports into an HTML file. | `generator-bridge` |
+| Workflow File | Description |
+|---------------|-------------|
+| `markdown-lint.yml` | CI job for linting markdown files. |
+| `generate-junit-to-html-report.yml` | CI job for consolidating JUNIT XML test reports into an HTML file. |
+| `quality-security-checks.yml` | CI Job to run standard quality and security checks. |
 
 ## Purpose
 
