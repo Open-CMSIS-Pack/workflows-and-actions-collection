@@ -27,12 +27,18 @@ markdown-check:
     link-check-config: '.github/markdown-link-check.jsonc'
     ignore-files: 'third_party_licenses.md'
 ```
+
 ```yaml
 html-test-report:
   needs: [ test ]
   uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/generate-junit-to-html-report.yml@main
   with:
     report_header: cbridge
+```
+
+```yaml
+quality-and-security-checks:
+  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/quality-security-checks.yml@main
 ```
 
 ## License
