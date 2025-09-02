@@ -19,6 +19,12 @@ This helps maintain consistent best practices across repositories and reduces du
 
 ## Example Caller Workflow
 
+Below are some example jobs that demonstrate how to integrate linting, report generation, and quality/security checks using the shared workflows.
+
+### Markdown Linting and Link Checking
+
+This job runs markdown linting and validates links with the provided configuration files. You can also specify files to ignore.
+
 ```yaml
 markdown-check:
   uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/markdown-lint.yml@main
@@ -27,12 +33,26 @@ markdown-check:
     link-check-config: '.github/markdown-link-check.jsonc'
     ignore-files: 'third_party_licenses.md'
 ```
+
+### Generate HTML Test Report
+
+This job converts JUnit test results into an HTML report, with a custom header for easier identification. It is set to run after the test job finishes.
+
 ```yaml
 html-test-report:
   needs: [ test ]
   uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/generate-junit-to-html-report.yml@main
   with:
     report_header: cbridge
+```
+
+### Quality and Security Checks
+
+This job triggers a standard workflow that runs a set of quality assurance and security validation checks.
+
+```yaml
+quality-and-security-checks:
+  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/quality-security-checks.yml@main
 ```
 
 ## License
