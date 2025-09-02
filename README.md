@@ -5,6 +5,7 @@ pipelines, enforce quality standards, and streamline DevOps processes across rep
 
 | Workflow File | Description |
 |---------------|-------------|
+| `build.yml` | Build Go binaries for all OS/arch. |
 | `markdown-lint.yml` | CI job for linting markdown files. |
 | `generate-junit-to-html-report.yml` | CI job for consolidating JUNIT XML test reports into an HTML file. |
 | `quality-security-checks.yml` | CI Job to run standard quality and security checks. |
@@ -22,9 +23,20 @@ This helps maintain consistent best practices across repositories and reduces du
 
 Below are some example jobs that demonstrate how to integrate linting, report generation, and quality/security checks using the shared workflows.
 
-### Markdown Linting and Link Checking
+### Build binaries
 
 This job runs markdown linting and validates links with the provided configuration files. You can also specify files to ignore.
+
+```yaml
+build:
+  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/build.yml@main
+  with:
+    program: 'cbridge' # Name of the binary to build
+```
+
+### Markdown Linting and Link Checking
+
+This job builds a Go program across Linux/Windows/macOS (amd64, arm64), and uploads artifacts.
 
 ```yaml
 markdown-check:
