@@ -3,10 +3,12 @@
 A collection of reusable GitHub Actions and workflow templates for the Open‑CMSIS‑Pack ecosystem to automate CI/CD
 pipelines, enforce quality standards, and streamline DevOps processes across repositories.
 
-| Workflow File | Description | Where it is used |
-|---------------|-------------|------------------|
-| `markdown-lint.yml` | A CI for linting markdown files. | `generator-bridge` |
-| `generate-junit-to-html-report.yml` | A CI for consolidating JUNIT XML test reports into an HTML file. | `generator-bridge` |
+| Workflow File | Description |
+|---------------|-------------|
+| `build.yml` | Build Go binaries for all OS/arch. |
+| `markdown-lint.yml` | CI job for linting markdown files. |
+| `generate-junit-to-html-report.yml` | CI job for consolidating JUNIT XML test reports into an HTML file. |
+| `quality-security-checks.yml` | CI Job to run standard quality and security checks. |
 
 ## Purpose
 
@@ -19,6 +21,23 @@ This helps maintain consistent best practices across repositories and reduces du
 
 ## Example Caller Workflow
 
+Below are some example jobs that demonstrate how to integrate linting, report generation, and quality/security checks using the shared workflows.
+
+### Build binaries
+
+This job runs markdown linting and validates links with the provided configuration files. You can also specify files to ignore.
+
+```yaml
+build:
+  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/build.yml@main
+  with:
+    program: 'cbridge' # Name of the binary to build
+```
+
+### Markdown Linting and Link Checking
+
+This job builds a Go program across Linux/Windows/macOS (amd64, arm64), and uploads artifacts.
+
 ```yaml
 markdown-check:
   uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/markdown-lint.yml@main
@@ -27,12 +46,26 @@ markdown-check:
     link-check-config: '.github/markdown-link-check.jsonc'
     ignore-files: 'third_party_licenses.md'
 ```
+
+### Generate HTML Test Report
+
+This job converts JUnit test results into an HTML report, with a custom header for easier identification. It is set to run after the test job finishes.
+
 ```yaml
 html-test-report:
   needs: [ test ]
   uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/generate-junit-to-html-report.yml@main
   with:
     report_header: cbridge
+```
+
+### Quality and Security Checks
+
+This job triggers a standard workflow that runs a set of quality assurance and security validation checks.
+
+```yaml
+quality-and-security-checks:
+  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/quality-security-checks.yml@main
 ```
 
 ## License
