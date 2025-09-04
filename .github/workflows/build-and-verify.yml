@@ -1,0 +1,180 @@
+name: Build and Verify
+
+on:
+  workflow_call:
+    inputs:
+      program:
+        type: string
+        required: true
+        description: Name of the utility to build (used for artifact name & output matching).
+      build-matrix-goos:
+        type: string
+        required: false
+        default: '["windows", "linux", "darwin"]'
+        description: JSON array of OSes to build for.
+      build-matrix-arch:
+        type: string
+        required: false
+        default: '["amd64", "arm64"]'
+        description: JSON array of architectures to build for.
+      test-platform:
+        type: string
+        required: false
+        default: '["windows-latest", "ubuntu-latest", "macos-latest"]'
+        description: Platform for running tests.
+      test-arch:
+        type: string
+        required: false
+        default: '["amd64", "arm64"]'
+        description: Architecture for running tests.
+      go-version-file:
+        type: string
+        required: false
+        default: './go.mod'
+        description: Path to go.mod file for Go version detection.
+      artifact-retention-days:
+        type: number
+        required: false
+        default: 7
+        description: Days to retain build artifacts.
+
+jobs:
+  quality-security-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout caller repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ${{ github.event.repository.full_name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          check-latest: true
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8.0.0
+        with:
+          version: latest
+          skip-cache: true
+
+      - name: Format Check
+        run: make format-check
+
+      - name: Gosec Security Scanner
+        uses: securego/gosec@c9453023c4e81ebdb6dde29e22d9cd5e2285fb16 # v2.22.8
+        with:
+          args: '-severity high -exclude-dir=testdata -exclude=*_test.go ./...'
+
+      - name: Vulnerability Scan
+        uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          go-package: ./...
+
+  build:
+    name: 'Build (${{ matrix.goos }}, ${{ matrix.arch }})'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: ${{ fromJson(inputs.build-matrix-goos) }}
+        arch: ${{ fromJson(inputs.build-matrix-arch) }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ${{ github.event.repository.full_name }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          check-latest: true
+
+      - name: Build
+        run: |
+          echo "Building ${{ inputs.program }} for ${GOOS:=${{ matrix.goos }}}/${GOARCH:=${{ matrix.arch }}}"
+          make OS=${{ matrix.goos }} ARCH=${{ matrix.arch }} build
+
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.program }}-${{ matrix.goos }}-${{ matrix.arch }}
+          path: build/${{ inputs.program }}*
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+  test:
+    name: 'Test (${{ matrix.platform }}, ${{ matrix.arch }})'
+    strategy:
+      matrix:
+        platform: ${{ fromJson(inputs.test-platform) }}
+        arch: ${{ fromJson(inputs.test-arch) }}
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ${{ github.event.repository.full_name }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          check-latest: true
+
+      - name: Set target based on platform
+        shell: bash
+        id: get-target
+        run: |
+          if [[ "${{ matrix.platform }}" == *"ubuntu"* ]]; then
+            echo "target=linux" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.platform }}" == *"windows"* ]]; then
+            echo "target=windows" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.platform }}" == *"macos"* ]]; then
+            echo "target=darwin" >> $GITHUB_OUTPUT
+          else
+            echo "target=unknown" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install go-junit-report
+        run: go install github.com/jstemmer/go-junit-report/v2@14d61e6e75e3f3c74551d757ad936e8e88014464 # v2.1.0
+
+      - name: Run tests
+        run: |
+          mkdir -p build
+          make test > build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt
+# set GOOS=${{ steps.get-target.outputs.target }} && set GOARCH=${{ matrix.arch }} && go test -v ./... > build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt
+
+      - name: Generate JUnit report
+        run: |
+          go-junit-report -set-exit-code -in build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt -iocopy -out build/${{ inputs.program }}-testreport-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.xml
+
+      - name: Archive test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}
+          path: ./build/${{ inputs.program }}-testreport-*.xml
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: error
