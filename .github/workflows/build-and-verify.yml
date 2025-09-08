@@ -1,3 +1,6 @@
+# Reusable workflow: Build and Verify Go utilities across multiple OS/ARCH combos,
+# with linting and security checks. Designed to be called via workflow_call.
+
 name: Build and Verify
 
 on:
@@ -7,26 +10,14 @@ on:
         type: string
         required: true
         description: Name of the utility to build (used for artifact name & output matching).
-      build-matrix-goos:
+      build-matrix:
         type: string
         required: false
-        default: '["windows", "linux", "darwin"]'
-        description: JSON array of OSes to build for.
-      build-matrix-arch:
+        description: 'JSON array of objects: [{ "goos": "...", "arch": "..." }] for build combinations.'
+      test-matrix:
         type: string
         required: false
-        default: '["amd64", "arm64"]'
-        description: JSON array of architectures to build for.
-      test-platform:
-        type: string
-        required: false
-        default: '["windows-latest", "ubuntu-latest", "macos-latest"]'
-        description: Platform for running tests.
-      test-arch:
-        type: string
-        required: false
-        default: '["amd64", "arm64"]'
-        description: Architecture for running tests.
+        description: 'JSON array of objects: [{ "platform": "...", "arch": "..." }] for test combinations.'
       go-version-file:
         type: string
         required: false
@@ -38,8 +29,14 @@ on:
         default: 7
         description: Days to retain build artifacts.
 
+# Default shell to keep behavior consistent across steps.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   quality-security-checks:
+    name: Quality & Security Checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -81,13 +78,14 @@ jobs:
           go-package: ./...
 
   build:
+    needs: quality-security-checks
     name: 'Build (${{ matrix.goos }}, ${{ matrix.arch }})'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # If the caller didn't pass a build-matrix, use defaults for tri-OS and dual-arch.
       matrix:
-        goos: ${{ fromJson(inputs.build-matrix-goos) }}
-        arch: ${{ fromJson(inputs.build-matrix-arch) }}
+        include: ${{ fromJson(inputs.build-matrix != '' && inputs.build-matrix || '[{"goos":"windows","arch":"amd64"},{"goos":"windows","arch":"arm64"},{"goos":"linux","arch":"amd64"},{"goos":"linux","arch":"arm64"},{"goos":"darwin","arch":"amd64"},{"goos":"darwin","arch":"arm64"}]') }}
 
     steps:
       - name: Harden Runner
@@ -120,11 +118,14 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
 
   test:
+    needs: quality-security-checks
     name: 'Test (${{ matrix.platform }}, ${{ matrix.arch }})'
     strategy:
+      fail-fast: false
+      # If the caller didn't pass a test-matrix, use defaults for tri-OS and dual-arch.
       matrix:
-        platform: ${{ fromJson(inputs.test-platform) }}
-        arch: ${{ fromJson(inputs.test-arch) }}
+        include: ${{ fromJson(inputs.test-matrix != '' && inputs.test-matrix || '[{"platform":"windows-2022","arch":"amd64"},{"platform":"windows-2022","arch":"arm64"},{"platform":"ubuntu-24.04","arch":"amd64"},{"platform":"ubuntu-24.04","arch":"arm64"},{"platform":"macos-14","arch":"amd64"},{"platform":"macos-14","arch":"arm64"}]') }}
+
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -144,8 +145,7 @@ jobs:
           go-version-file: ${{ inputs.go-version-file }}
           check-latest: true
 
-      - name: Set target based on platform
-        shell: bash
+      - name: Resolve GOOS from runner platform
         id: get-target
         run: |
           if [[ "${{ matrix.platform }}" == *"ubuntu"* ]]; then
@@ -169,7 +169,10 @@ jobs:
 
       - name: Generate JUnit report
         run: |
-          go-junit-report -set-exit-code -in build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt -iocopy -out build/${{ inputs.program }}-testreport-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.xml
+          go-junit-report -set-exit-code \
+            -in build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt \
+            -iocopy \
+            -out build/${{ inputs.program }}-testreport-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.xml
 
       - name: Archive test results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
