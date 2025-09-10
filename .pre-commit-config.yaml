@@ -7,3 +7,4 @@ repos:
         entry: python3 ../workflows-and-actions-collection/scripts/check_copyright_notice.py
         language: system
         files: \.go$
+        args: []

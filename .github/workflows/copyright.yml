@@ -2,6 +2,11 @@ name: Copyright
 
 on:
   workflow_call:
+    inputs:
+      copyright-text:
+        type: string
+        required: true
+        description: 'Copyright text to check in source files.'
 
 jobs:
   check:
@@ -34,6 +39,12 @@ jobs:
       - name: Print .pre-commit-config.yaml content
         run: cat .pre-commit-config.yaml
         working-directory: ./workflows-and-actions-collection
+
+      - name: Inject copyright-text into pre-commit config
+        run: |
+          pip install yq
+          yq -y -i '.repos[0].hooks[0].args = ["--copyright-text=${{ inputs.copyright-text }}"]' ../workflows-and-actions-collection/.pre-commit-config.yaml
+        working-directory: ./caller-repository
 
       # Run copyright check using pre-commit
       - name: Check copyright notice

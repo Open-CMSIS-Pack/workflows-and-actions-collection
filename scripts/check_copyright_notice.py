@@ -17,7 +17,6 @@ import magic
 import logging
 from comment_parser import comment_parser
 
-COPYRIGHT_TEXT = "Copyright (c) <ValidYear>"
 LICENSE_TEXT = "SPDX-License-Identifier: Apache-2.0"
 
 def check_file(filename: str, copyright_reg_exp: re.Pattern) -> int:
@@ -58,7 +57,7 @@ def check_file(filename: str, copyright_reg_exp: re.Pattern) -> int:
 
     errstr = ""
     if not copyrightfound:
-        errstr += "\n\t # Missing or invalid copyright text. Please follow format: " + COPYRIGHT_TEXT
+        errstr += "\n\t # Missing or invalid copyright text."
     if not licensefound:
         errstr += "\n\t # Missing or invalid license text. Please write : " + LICENSE_TEXT
 
@@ -71,15 +70,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     Returns non-zero if any file is missing a valid notice.
     """
     parser = argparse.ArgumentParser(description="Check copyright and license headers in files.")
+    parser.add_argument('--copyright-text', type=str, help="Copyright text to check")
     parser.add_argument('filenames', nargs='*', help="Files to check")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     logging.info("Checking copyright headers...")
 
+    if not args.copyright_text:
+      logging.error("No copyright text provided. Please set the copyright-text input in the workflow.")
+      return 1
+
     ret = 0
-    # Improved regex: matches years 1900-2099, allows for trailing non-digit
-    copyright_reg_exp = re.compile(r"Copyright\s\(c\)\s(19|20)\d{2}\b")
+    copyright_reg_exp = re.compile(re.escape(args.copyright_text))
+    # copyright_reg_exp = re.compile(r"Copyright\s\(c\)\s(19|20)\d{2}\b")
 
     checked_files = 0
     for filename in args.filenames:
