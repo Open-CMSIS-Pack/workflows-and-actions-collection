@@ -1,0 +1,46 @@
+name: Copyright
+
+on:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      # Checkout this workflow repository
+      - name: Checkout workflows-and-actions-collection repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: Open-CMSIS-Pack/workflows-and-actions-collection
+          path: workflows-and-actions-collection
+          ref: copyright-check
+
+      # Checkout the target (caller) repository
+      - name: Checkout target repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ${{ github.event.repository.full_name }}
+          path: caller-repository
+          ref: ${{ github.ref }}
+
+      - name: List files
+        run: ls -R
+
+      - name: Print .pre-commit-config.yaml content
+        run: cat .pre-commit-config.yaml
+        working-directory: ./workflows-and-actions-collection
+
+      # Run copyright check using pre-commit
+      - name: Check copyright notice
+        run: |
+          pip install --upgrade \
+            pre-commit \
+            python-magic==0.4.18 \
+            comment-parser>=1.2.3
+          pre-commit run --all-files --config ../workflows-and-actions-collection/.pre-commit-config.yaml
+        working-directory: ./caller-repository
