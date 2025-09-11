@@ -1,0 +1,264 @@
+# Reusable workflow: Build and Verify Go utilities across multiple OS/ARCH combos,
+# with linting and security checks. Designed to be called via workflow_call.
+
+name: Build and Verify
+
+on:
+  workflow_call:
+    secrets:
+      QLTY_COVERAGE_TOKEN:
+        required: false
+        description: This secret is needed for Qlty (Code Climate).
+    inputs:
+      program:
+        type: string
+        required: true
+        description: Name of the utility to build (used for artifact name & output matching).
+      build-matrix:
+        type: string
+        required: false
+        description: 'JSON array of objects: [{ "goos": "...", "arch": "..." }] for build combinations.'
+      test-matrix:
+        type: string
+        required: false
+        description: 'JSON array of objects: [{ "platform": "...", "arch": "..." }] for test combinations.'
+      go-version-file:
+        type: string
+        required: false
+        default: './go.mod'
+        description: Path to go.mod file for Go version detection.
+      enable-code-climate:
+        type: boolean
+        required: true
+        description: If true, coverage reports are uploaded to Qlty (Code Climate). Requires QLTY_COVERAGE_TOKEN secret.
+      artifact-retention-days:
+        type: number
+        required: false
+        default: 7
+        description: Days to retain build artifacts.
+
+# Default shell to keep behavior consistent across steps.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  quality-security-checks:
+    name: Quality & Security Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout caller repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ${{ github.event.repository.full_name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          check-latest: true
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8.0.0
+        with:
+          version: latest
+          skip-cache: true
+
+      - name: Format Check
+        run: make format-check
+
+      - name: Gosec Security Scanner
+        uses: securego/gosec@c9453023c4e81ebdb6dde29e22d9cd5e2285fb16 # v2.22.8
+        with:
+          args: '-severity high -exclude-dir=testdata -exclude=*_test.go ./...'
+
+      - name: Vulnerability Scan
+        uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          check-latest: true
+          cache: false
+          go-package: ./...
+
+  build:
+    needs: quality-security-checks
+    name: 'Build (${{ matrix.goos }}, ${{ matrix.arch }})'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # If the caller didn't pass a build-matrix, use defaults for tri-OS and dual-arch.
+      matrix:
+        include: ${{ fromJson(inputs.build-matrix != '' && inputs.build-matrix || '[{"goos":"windows","arch":"amd64"},{"goos":"windows","arch":"arm64"},{"goos":"linux","arch":"amd64"},{"goos":"linux","arch":"arm64"},{"goos":"darwin","arch":"amd64"},{"goos":"darwin","arch":"arm64"}]') }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ${{ github.event.repository.full_name }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          check-latest: true
+
+      - name: Build
+        run: |
+          echo "Building ${{ inputs.program }} for ${GOOS:=${{ matrix.goos }}}/${GOARCH:=${{ matrix.arch }}}"
+          make OS=${{ matrix.goos }} ARCH=${{ matrix.arch }} build
+
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.program }}-${{ matrix.goos }}-${{ matrix.arch }}
+          path: build/${{ inputs.program }}*
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+  test:
+    needs: quality-security-checks
+    name: 'Test (${{ matrix.platform }}, ${{ matrix.arch }})'
+    strategy:
+      fail-fast: false
+      # If the caller didn't pass a test-matrix, use defaults for tri-OS and dual-arch.
+      matrix:
+        include: ${{ fromJson(inputs.test-matrix != '' && inputs.test-matrix || '[{"platform":"windows-2022","arch":"amd64"},{"platform":"windows-2022","arch":"arm64"},{"platform":"ubuntu-24.04","arch":"amd64"},{"platform":"ubuntu-24.04","arch":"arm64"},{"platform":"macos-14","arch":"amd64"},{"platform":"macos-14","arch":"arm64"}]') }}
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ${{ github.event.repository.full_name }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          check-latest: true
+
+      - name: Resolve GOOS from runner platform
+        id: get-target
+        run: |
+          if [[ "${{ matrix.platform }}" == *"ubuntu"* ]]; then
+            echo "target=linux" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.platform }}" == *"windows"* ]]; then
+            echo "target=windows" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.platform }}" == *"macos"* ]]; then
+            echo "target=darwin" >> $GITHUB_OUTPUT
+          else
+            echo "target=unknown" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install go-junit-report
+        run: go install github.com/jstemmer/go-junit-report/v2@14d61e6e75e3f3c74551d757ad936e8e88014464 # v2.1.0
+
+      - name: Run tests
+        run: |
+          mkdir -p build
+          make test > build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt
+
+      - name: Generate JUnit report
+        run: |
+          go-junit-report -set-exit-code \
+            -in build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt \
+            -iocopy \
+            -out build/${{ inputs.program }}-testreport-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.xml
+
+      - name: Archive test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}
+          path: ./build/${{ inputs.program }}-testreport-*.xml
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: error
+
+  html-test-report:
+    name: Generate HTML Test Report
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: Open-CMSIS-Pack/workflows-and-actions-collection
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+
+      - name: Download test results
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          path: artifacts/
+
+      - name: List downloaded files
+        run: ls -R artifacts/
+
+      - name: Install dependencies 
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas
+
+      - name: Run test report generator
+        run: |
+          python ./scripts/generate_junit_to_html_report.py \
+            --test_report_dir artifacts \
+            --report_header "${{ inputs.program }}" \
+            --output_file test_report.html
+
+      - name: Upload HTML report as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: html-test-report
+          path: test_report.html
+
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-24.04
+    if: inputs.enable-code-climate == true
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ${{ github.event.repository.full_name }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          check-latest: true
+
+      - name: Coverage check
+        run: make coverage-check
+
+      - name: Publish coverage report to QLTY
+        uses: qltysh/qlty-action/coverage@a19242102d17e497f437d7466aa01b528537e899 # v1
+        with:
+          token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+          files: ./cover.out
+          strip-prefix: github.com/open-cmsis-pack/generator-bridge

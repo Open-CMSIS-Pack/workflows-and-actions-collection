@@ -1,14 +1,14 @@
 # Workflows & Actions Collection
 
-A collection of reusable GitHub Actions and workflow templates for the Open‑CMSIS‑Pack ecosystem to automate CI/CD
-pipelines, enforce quality standards, and streamline DevOps processes across repositories.
+A collection of reusable GitHub Actions and workflow templates for the
+Open‑CMSIS‑Pack ecosystem to automate CI/CD pipelines, enforce quality
+standards, and streamline DevOps processes across repositories.
 
 | Workflow File | Description |
 |---------------|-------------|
-| `build.yml` | Build Go binaries for all OS/arch. |
+| `build-and-verify.yml` | Run standard quality and security checks, Build, Test Go binaries for selected OS/arch. |
 | `markdown-lint.yml` | CI job for linting markdown files. |
 | `generate-junit-to-html-report.yml` | CI job for consolidating JUNIT XML test reports into an HTML file. |
-| `quality-security-checks.yml` | CI Job to run standard quality and security checks. |
 
 ## Purpose
 
@@ -17,26 +17,74 @@ Centralize GitHub automation patterns for:
 - Workflows and CI/CD practices adopted by Open-CMSIS-Pack
 - Serve as a central index of common reusable scripts/configs/workflows usage within the ecosystem
 
-This helps maintain consistent best practices across repositories and reduces duplication.
+This helps maintain consistent best practices across repositories and reduces
+duplication.
 
 ## Example Caller Workflow
 
-Below are some example jobs that demonstrate how to integrate linting, report generation, and quality/security checks using the shared workflows.
+Below are some example jobs that demonstrate how to integrate linting, report
+generation, and quality/security checks using the shared workflows.
 
-### Build binaries
+### Build and Verify Binaries
 
-This job runs markdown linting and validates links with the provided configuration files. You can also specify files to ignore.
+This reusable job performs quality assurance, security validation, and then
+builds and tests a Go program across the specified OS/Arch combinations.
+
+#### Example Usage
 
 ```yaml
 build:
-  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/build.yml@main
+  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/build-and-verify.yml@main
   with:
     program: 'cbridge' # Name of the binary to build
+    build-matrix: '[{"goos":"linux","arch":"amd64"},{"goos":"windows","arch":"arm64"}]'
+    test-matrix: '[{"platform":"ubuntu-24.04","arch":"amd64"},{"platform":"macos-14","arch":"arm64"}]'
+    go-version-file: ./go.mod # Path to go.mod file for Go version detection
 ```
+
+or
+
+```yaml
+build:
+  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/build-and-verify.yml@main
+  with:
+    program: 'cbridge'              # Name of the binary to build
+    go-version-file: ./go.mod       # Path to go.mod file for Go version detection
+    artifact-retention-days: 1      # Days to retain build artifacts (default: 7)
+```
+
+If no custom matrix is provided, the workflow uses the following defaults:
+
+- **Build Matrix** (`build-matrix`)
+
+  ```json
+  [
+    {"goos":"windows","arch":"amd64"},
+    {"goos":"windows","arch":"arm64"},
+    {"goos":"linux","arch":"amd64"},
+    {"goos":"linux","arch":"arm64"},
+    {"goos":"darwin","arch":"amd64"},
+    {"goos":"darwin","arch":"arm64"}
+  ]
+  ```
+
+- **Test Matrix** (`test-matrix`)
+
+  ```json
+  [
+    {"platform":"windows-2022","arch":"amd64"},
+    {"platform":"windows-2022","arch":"arm64"},
+    {"platform":"ubuntu-24.04","arch":"amd64"},
+    {"platform":"ubuntu-24.04","arch":"arm64"},
+    {"platform":"macos-14","arch":"amd64"},
+    {"platform":"macos-14","arch":"arm64"}
+  ]
+  ```
 
 ### Markdown Linting and Link Checking
 
-This job builds a Go program across Linux/Windows/macOS (amd64, arm64), and uploads artifacts.
+This job runs markdown linting and validates links with the provided
+configuration files. You can also specify files to ignore.
 
 ```yaml
 markdown-check:
@@ -49,7 +97,8 @@ markdown-check:
 
 ### Generate HTML Test Report
 
-This job converts JUnit test results into an HTML report, with a custom header for easier identification. It is set to run after the test job finishes.
+This job converts JUnit test results into an HTML report, with a custom
+header for easier identification. It is set to run after the test job finishes.
 
 ```yaml
 html-test-report:
@@ -57,15 +106,6 @@ html-test-report:
   uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/generate-junit-to-html-report.yml@main
   with:
     report_header: cbridge
-```
-
-### Quality and Security Checks
-
-This job triggers a standard workflow that runs a set of quality assurance and security validation checks.
-
-```yaml
-quality-and-security-checks:
-  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/quality-security-checks.yml@main
 ```
 
 ## License
