@@ -174,7 +174,6 @@ jobs:
         run: |
           mkdir -p build
           make test > build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt
-# set GOOS=${{ steps.get-target.outputs.target }} && set GOARCH=${{ matrix.arch }} && go test -v ./... > build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt
 
       - name: Generate JUnit report
         run: |
