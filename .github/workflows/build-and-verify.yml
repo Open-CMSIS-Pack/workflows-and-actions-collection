@@ -157,14 +157,16 @@ jobs:
       - name: Resolve GOOS from runner platform
         id: get-target
         run: |
-          if [[ "${{ matrix.platform }}" == *"ubuntu"* ]]; then
-            echo "target=linux" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.platform }}" == *"windows"* ]]; then
-            echo "target=windows" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.platform }}" == *"macos"* ]]; then
-            echo "target=darwin" >> $GITHUB_OUTPUT
+          platform="${{ matrix.platform }}"
+
+          if [[ "$platform" == *"ubuntu"* ]]; then
+            echo "target=linux" >> "$GITHUB_OUTPUT"
+          elif [[ "$platform" == *"windows"* ]]; then
+            echo "target=windows" >> "$GITHUB_OUTPUT"
+          elif [[ "$platform" == *"macos"* ]]; then
+            echo "target=darwin" >> "$GITHUB_OUTPUT"
           else
-            echo "target=unknown" >> $GITHUB_OUTPUT
+            echo "target=unknown" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install go-junit-report
