@@ -1,0 +1,75 @@
+name: Update go-workflows
+
+on:
+  workflow_call:
+    secrets:
+      TOKEN_ACCESS:
+        required: true
+        description: Token with permissions to push branches and open PRs
+
+jobs:
+  update-workflows:
+    runs-on: [ubuntu-latest]
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install pre-requisites
+        run: |
+          sudo apt update
+          sudo apt install -y git jq
+
+      - name: Get latest workflow tag
+        id: latest-tag
+        run: |
+          LATEST_TAG=$(curl --silent "https://api.github.com/repos/Open-CMSIS-Pack/workflows-and-actions-collection/releases/latest" | jq -r .tag_name)
+          echo "Latest workflow version is $LATEST_TAG"
+          echo "latest-tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Update workflow references
+        id: update
+        run: |
+          set -euo pipefail
+          repo_path='Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows'
+          tag='${{ steps.latest-tag.outputs.latest-tag }}'
+
+          # find only YAML workflow files that reference the shared repo
+          mapfile -t files < <(grep -rl --include='*.yml' --include='*.yaml' "$repo_path" .github/workflows || true)
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No workflow files reference $repo_path"
+          else
+            for f in "${files[@]}"; do
+              # replace any @<anything> after the referenced workflow with @<latest tag>
+              sed -E -i "s|( $repo_path/[^@]+)@[^\"' ]+|\\1@${tag}|g" "$f"
+            done
+          fi
+
+          # set output if there are changes
+          if ! git diff --quiet; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No changes to commit."
+          fi
+
+      - name: Check for changes
+        id: check-changes
+        continue-on-error: true
+        run: git diff --exit-code || echo "changes-found=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        if: steps.update.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
+        with:
+          token: ${{ secrets.TOKEN_ACCESS }}
+          commit-message: "Update go-workflows to ${{ steps.latest-tag.outputs.latest-tag }}"
+          branch: update-go-workflow
+          delete-branch: true
+          title: "🤖 Update go-workflows to ${{ steps.latest-tag.outputs.latest-tag }}"
+          body: |
+            Updates all common workflows references to the latest version.
