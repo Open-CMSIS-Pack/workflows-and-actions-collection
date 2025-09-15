@@ -44,22 +44,34 @@ jobs:
       - name: Determine lint config path
         id: lint-config-path
         run: |
-          if [ "${{ inputs.lint-config }}" = "configs/md_lint_config.yml" ]; then
-            echo "config_path=${{ env.WORKFLOW_DIR }}/${{ inputs.lint-config }}" >> $GITHUB_OUTPUT
+          lint_config='${{ inputs.lint-config }}'
+          workflow_dir='${{ env.WORKFLOW_DIR }}'
+          caller_dir='${{ env.CALLER_DIR }}'
+
+          if [ "$lint_config" = "configs/md_lint_config.yml" ]; then
+            config_path="$workflow_dir/$lint_config"
           else
-            echo "config_path=${{ env.CALLER_DIR }}/${{ inputs.lint-config }}" >> $GITHUB_OUTPUT
+            config_path="$caller_dir/$lint_config"
           fi
+          printf 'config_path=%s\n' "$config_path" >> "$GITHUB_OUTPUT"
 
       - name: Prefix caller directory to ignore-files
         id: formatted-ignore
         run: |
-          IGNORE_INPUT="${{ inputs.ignore-files }}"
+          IGNORE_INPUT='${{ inputs.ignore-files }}'
+          CALLER_DIR='${{ env.CALLER_DIR }}'
+
           if [ -z "$IGNORE_INPUT" ]; then
-            echo "result=" >> $GITHUB_OUTPUT
+            printf 'result=\n' >> "$GITHUB_OUTPUT"
           else
-            # Replace comma or space with newline, prefix each line, then join with commas
-            FORMATTED=$(echo "$IGNORE_INPUT" | tr ', ' '\n' | sed "s|^|${{ env.CALLER_DIR }}/|" | paste -sd, -)
-            echo "result=$FORMATTED" >> $GITHUB_OUTPUT
+            # Split on commas/spaces, drop empties, prefix each with CALLER_DIR, then join with commas
+            FORMATTED=$(
+              printf '%s\n' "$IGNORE_INPUT" \
+              | tr ', ' '\n' \
+              | awk -v base="$CALLER_DIR" 'NF{print base "/" $0}' \
+              | paste -sd, -
+            )
+            printf 'result=%s\n' "$FORMATTED" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run markdownlint
@@ -89,11 +101,16 @@ jobs:
       - name: Determine link check config path
         id: link-config-path
         run: |
-          if [ "${{ inputs.link-check-config }}" = "configs/mlc_config.json" ]; then
-            echo "config_path=${{ env.WORKFLOW_DIR }}/${{ inputs.link-check-config }}" >> $GITHUB_OUTPUT
+          link_cfg='${{ inputs.link-check-config }}'
+          workflow_dir='${{ env.WORKFLOW_DIR }}'
+          caller_dir='${{ env.CALLER_DIR }}'
+
+          if [ "$link_cfg" = "configs/mlc_config.json" ]; then
+            config_path="$workflow_dir/$link_cfg"
           else
-            echo "config_path=${{ env.CALLER_DIR }}/${{ inputs.link-check-config }}" >> $GITHUB_OUTPUT
+            config_path="$caller_dir/$link_cfg"
           fi
+          printf 'config_path=%s\n' "$config_path" >> "$GITHUB_OUTPUT"
 
       - name: Check markdown links
         uses: tcort/github-action-markdown-link-check@a800ad5f1c35bf61987946fd31c15726a1c9f2ba # v1.1.0

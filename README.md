@@ -34,7 +34,7 @@ builds and tests a Go program across the specified OS/Arch combinations.
 
 ```yaml
 build:
-  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/build-and-verify.yml@main
+  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/build-and-verify.yml@v1.0.0
   with:
     program: 'cbridge' # Name of the binary to build
     build-matrix: '[{"goos":"linux","arch":"amd64"},{"goos":"windows","arch":"arm64"}]'
@@ -46,7 +46,7 @@ or
 
 ```yaml
 build:
-  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/build-and-verify.yml@main
+  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/build-and-verify.yml@v1.0.0
   with:
     program: 'cbridge'              # Name of the binary to build
     go-version-file: ./go.mod       # Path to go.mod file for Go version detection
@@ -88,7 +88,7 @@ configuration files. You can also specify files to ignore.
 
 ```yaml
 markdown-check:
-  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/markdown-lint.yml@main
+  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/markdown-lint.yml@v1.0.0
   with:
     lint-config: '.github/markdownlint.jsonc'
     link-check-config: '.github/markdown-link-check.jsonc'
@@ -107,6 +107,27 @@ html-test-report:
   with:
     report_header: cbridge
 ```
+
+## Keeping the Workflows Up To Date
+
+There is a workflow which keeps the go-workflows up to date. This should be included in the .github/workflows directory alongside any go-workflows.
+
+Here is how to use it in an extension repository:
+
+```yaml
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 3 * * *"
+
+jobs:
+  update-workflows:
+    uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/update-workflows.yml@v1.0.0
+    secrets:
+      TOKEN_ACCESS: ${{ secrets.PR_ACCESS_TOKEN }}
+```
+
+If there is a new version of vscode-workflows available a PR will be created which updates all the workflows to use the latest version, including the update workflow itself.
 
 ## License
 
