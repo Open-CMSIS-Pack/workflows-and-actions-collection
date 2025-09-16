@@ -20,8 +20,6 @@ jobs:
     uses: ./.github/workflows/build-and-verify.yml
     with:
       program: testapp
-      build-matrix: '[{"goos":"linux","arch":"amd64"}]'
-      test-matrix: '[{"platform":"ubuntu-24.04","arch":"amd64"}]'
       go-version-file: ./test/go.mod
       enable-qlty-coverage: false
       working-directory: './test'
