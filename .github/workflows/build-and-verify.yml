@@ -262,5 +262,7 @@ jobs:
         uses: qltysh/qlty-action/coverage@a19242102d17e497f437d7466aa01b528537e899 # v1
         with:
           token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
-          files: ./cover.out
-          strip-prefix: github.com/open-cmsis-pack/generator-bridge
+          files: '**/cover.out'
+          strip-prefix: github.com/open-cmsis-pack/${{ inputs.program }}
+          skip-errors: false
+          validate: true
