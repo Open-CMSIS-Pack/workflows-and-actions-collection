@@ -4,18 +4,21 @@ A collection of reusable GitHub Actions and workflow templates for the
 Open‑CMSIS‑Pack ecosystem to automate CI/CD pipelines, enforce quality
 standards, and streamline DevOps processes across repositories.
 
+<!-- markdownlint-disable MD013 -->
+
 | Workflow File | Description |
 |---------------|-------------|
-| `build-and-verify.yml` | Run standard quality and security checks, Build, Test Go binaries for selected OS/arch. |
-| `markdown-lint.yml` | CI job for linting markdown files. |
-| `generate-junit-to-html-report.yml` | CI job for consolidating JUNIT XML test reports into an HTML file. |
+| [`build-and-verify.yml`](.github/workflows/build-and-verify.yml) | Run standard quality and security checks, Build, Test Go binaries for selected OS/arch. |
+| [`markdown-lint.yml`](.github/workflows/markdown-lint.yml) | CI job for linting markdown files. |
+
+<!-- markdownlint-enable MD013 -->
 
 ## Purpose
 
 Centralize GitHub automation patterns for:
 
 - Workflows and CI/CD practices adopted by Open-CMSIS-Pack
-- Serve as a central index of common reusable scripts/configs/workflows usage within the ecosystem
+- Serve as a central index of common reusable scripts/configs/workflows usage
 
 This helps maintain consistent best practices across repositories and reduces
 duplication.
@@ -95,22 +98,10 @@ markdown-check:
     ignore-files: 'third_party_licenses.md'
 ```
 
-### Generate HTML Test Report
-
-This job converts JUnit test results into an HTML report, with a custom
-header for easier identification. It is set to run after the test job finishes.
-
-```yaml
-html-test-report:
-  needs: [ test ]
-  uses: Open-CMSIS-Pack/workflows-and-actions-collection/.github/workflows/generate-junit-to-html-report.yml@main
-  with:
-    report_header: cbridge
-```
-
 ## Keeping the Workflows Up To Date
 
-There is a workflow which keeps the go-workflows up to date. This should be included in the .github/workflows directory alongside any go-workflows.
+There is a workflow which keeps the go-workflows up to date. This should be included in the
+.github/workflows directory alongside any go-workflows.
 
 Here is how to use it in an extension repository:
 
@@ -127,7 +118,8 @@ jobs:
       TOKEN_ACCESS: ${{ secrets.PR_ACCESS_TOKEN }}
 ```
 
-If there is a new version of vscode-workflows available a PR will be created which updates all the workflows to use the latest version, including the update workflow itself.
+If there is a new version of vscode-workflows available a PR will be created which updates all the
+workflows to use the latest version, including the update workflow itself.
 
 ## License
 

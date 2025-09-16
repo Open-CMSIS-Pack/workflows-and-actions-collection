@@ -64,12 +64,12 @@ jobs:
           if [ -z "$IGNORE_INPUT" ]; then
             printf 'result=\n' >> "$GITHUB_OUTPUT"
           else
-            # Split on commas/spaces, drop empties, prefix each with CALLER_DIR, then join with commas
+            # Split on commas/spaces, drop empties, prefix each with CALLER_DIR, then join with space
             FORMATTED=$(
               printf '%s\n' "$IGNORE_INPUT" \
               | tr ', ' '\n' \
               | awk -v base="$CALLER_DIR" 'NF{print base "/" $0}' \
-              | paste -sd, -
+              | paste -sd' ' -
             )
             printf 'result=%s\n' "$FORMATTED" >> "$GITHUB_OUTPUT"
           fi
