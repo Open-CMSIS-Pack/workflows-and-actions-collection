@@ -68,7 +68,7 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACCESS }}
           commit-message: "Update go-workflows to ${{ steps.latest-tag.outputs.latest-tag }}"
-          branch: update-go-workflow
+          branch: update-go-workflow-${{ github.run_id }}
           delete-branch: true
           title: "🤖 Update go-workflows to ${{ steps.latest-tag.outputs.latest-tag }}"
           body: |
