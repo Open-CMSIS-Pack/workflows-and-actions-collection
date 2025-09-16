@@ -1,0 +1,34 @@
+name: Self Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'configs/**'
+      - 'scripts/**'
+      - 'test/**'
+      - '!**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-verify:
+    uses: ./.github/workflows/build-and-verify.yml
+    with:
+      program: testapp
+      build-matrix: '[{"goos":"linux","arch":"amd64"}]'
+      test-matrix: '[{"platform":"ubuntu-24.04","arch":"amd64"}]'
+      go-version-file: ./test/go.mod
+      enable-qlty-coverage: false
+      working-directory: './test'
+      artifact-retention-days: 1
+
+  markdown-lint:
+    uses: ./.github/workflows/markdown-lint.yml
+    with:
+      lint-config: configs/md_lint_config.yml
+
