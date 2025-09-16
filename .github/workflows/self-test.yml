@@ -3,6 +3,8 @@ name: Self Test
 on:
   push:
     branches: [main]
+    tags:
+      - "v*"
   pull_request:
     paths:
       - '.github/workflows/**'
@@ -29,4 +31,3 @@ jobs:
     uses: ./.github/workflows/markdown-lint.yml
     with:
       lint-config: configs/md_lint_config.yml
-
