@@ -291,6 +291,5 @@ jobs:
         with:
           token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
           files: '${{ needs.configure-ci.outputs.working-dir }}/**/cover.out'
-          strip-prefix: github.com/open-cmsis-pack/${{ inputs.program }}
+          strip-prefix: ${{ inputs.program == 'cbuild' && 'github.com/Open-CMSIS-Pack/cbuild/v2' || format('github.com/Open-CMSIS-Pack/{0}', inputs.program) }}
           skip-errors: false
-          validate: true
