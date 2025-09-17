@@ -286,10 +286,26 @@ jobs:
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
         run: make coverage-check
 
+      - name: Normalize cover.out paths
+        working-directory: ${{ needs.configure-ci.outputs.working-dir }}
+        run: |
+          find . -name 'cover.out' -exec sed -i 's|github.com/Open-CMSIS-Pack|github.com/open-cmsis-pack|g' {} +
+
+      - name: Get strip-prefix for coverage
+        id: get-strip-prefix
+        run: |
+          if [ "${{ inputs.program }}" = "cbuild" ]; then
+            echo "prefix=github.com/open-cmsis-pack/cbuild/v2" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.program }}" = "cbridge" ]; then
+            echo "prefix=github.com/open-cmsis-pack/generator-bridge" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=github.com/open-cmsis-pack/${{ inputs.program }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish coverage report to QLTY
         uses: qltysh/qlty-action/coverage@a19242102d17e497f437d7466aa01b528537e899 # v1
         with:
           token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
           files: '${{ needs.configure-ci.outputs.working-dir }}/**/cover.out'
-          strip-prefix: ${{ inputs.program == 'cbuild' && 'github.com/Open-CMSIS-Pack/cbuild/v2' || format('github.com/Open-CMSIS-Pack/{0}', inputs.program) }}
+          strip-prefix: ${{ steps.get-strip-prefix.outputs.prefix }}
           skip-errors: false
