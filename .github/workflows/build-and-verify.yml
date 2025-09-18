@@ -200,9 +200,10 @@ jobs:
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
         run: |
           mkdir -p build
-          make test > build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt 2>&1
+          make test > build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt
 
       - name: Generate JUnit report
+        if: always()
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
         run: |
           go-junit-report -set-exit-code \
