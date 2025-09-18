@@ -200,7 +200,7 @@ jobs:
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
         run: |
           mkdir -p build
-          make test > build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt
+          make test > build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt 2>&1
 
       - name: Generate JUnit report
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
