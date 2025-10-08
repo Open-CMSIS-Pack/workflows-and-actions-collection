@@ -30,7 +30,7 @@ inputs:
     default: 'false'
 
   # Smart cache management inputs  
-  max-cache-size-gb:
+  max-cache-size:
     description: "Maximum total cache size in GB before cleanup (default: 8GB)"
     default: "8"
     required: false
@@ -55,6 +55,12 @@ outputs:
   space-freed-mb:
     description: 'Amount of space freed during cleanup in MB'
     value: ${{ steps.pre-cleanup.outputs.space-freed-mb || '0' }}
+  repo-cleanup-performed:
+    description: 'Whether repository-level cleanup was performed'
+    value: ${{ steps.repo-cleanup.outputs.repo-cleanup-performed || 'false' }}
+  repo-space-freed-mb:
+    description: 'Amount of space freed during repository cleanup in MB'
+    value: ${{ steps.repo-cleanup.outputs.repo-space-freed-mb || '0' }}
 
 runs:
   using: 'composite'
@@ -184,7 +190,7 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
-        MAX_SIZE_GB: ${{ inputs.max-cache-size-gb }}
+        MAX_SIZE_GB: ${{ inputs.max-cache-size }}
         ESTIMATED_SIZE_MB: ${{ steps.estimate-size.outputs.estimated-size-mb }}
         CLEANUP_THRESHOLD: "80"
         CURRENT_KEY: ${{ inputs.key }}
@@ -430,6 +436,251 @@ runs:
           fi
         fi
 
+    - name: Repository cache health check and cleanup
+      id: repo-cleanup
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        MAX_SIZE_GB: ${{ inputs.max-cache-size }}
+        CLEANUP_THRESHOLD: "80"
+        CURRENT_KEY: ${{ inputs.key }}
+        DRY_RUN: ${{ inputs.dry-run-cleanup }}
+      run: |
+        echo "🏥 Checking repository cache health..."
+        
+        # Initialize outputs
+        echo "repo-cleanup-performed=false" >> "$GITHUB_OUTPUT"
+        echo "repo-space-freed-mb=0" >> "$GITHUB_OUTPUT"
+        
+        # Check if tools are available
+        if ! command -v gh &> /dev/null; then
+          echo "⚠️  GitHub CLI not found. Skipping repository cleanup."
+          exit 0
+        fi
+        
+        if ! command -v jq &> /dev/null; then
+          echo "⚠️  jq not found. Skipping repository cleanup."
+          exit 0
+        fi
+        
+        # Cross-platform function to format bytes to human readable
+        format_bytes() {
+          local bytes=$1
+          if (( bytes >= 1073741824 )); then
+            echo "$(( bytes / 1073741824 ))GB"
+          elif (( bytes >= 1048576 )); then
+            echo "$(( bytes / 1048576 ))MB"
+          elif (( bytes >= 1024 )); then
+            echo "$(( bytes / 1024 ))KB"
+          else
+            echo "${bytes}B"
+          fi
+        }
+        
+        # Cross-platform function to decode base64
+        decode_base64() {
+          if command -v base64 >/dev/null 2>&1; then
+            if base64 --help 2>/dev/null | grep -q -- '--decode'; then
+              echo "$1" | base64 --decode 2>/dev/null
+            else
+              echo "$1" | base64 -d 2>/dev/null
+            fi
+          else
+            echo "base64 command not found" >&2
+            return 1
+          fi
+        }
+        
+        # Function to retry GitHub API calls
+        retry_gh_api() {
+          local retries=3
+          local delay=2
+          local cmd=("$@")
+          
+          for ((i=0; i<retries; i++)); do
+            if "${cmd[@]}" 2>/dev/null; then
+              return 0
+            fi
+            if [[ $i -lt $((retries-1)) ]]; then
+              echo "  API call failed, retrying in ${delay}s..."
+              sleep $delay
+              delay=$((delay * 2))
+            fi
+          done
+          return 1
+        }
+        
+        # Get current cache status
+        echo "📋 Analyzing repository cache usage..."
+        
+        cache_list=$(retry_gh_api gh api "repos/${{ github.repository }}/actions/caches" --paginate \
+          -q '.actions_caches[] | {key: .key, size_in_bytes: .size_in_bytes, created_at: .created_at, last_accessed_at: .last_accessed_at, id: .id}' || echo "")
+        
+        if [[ -z "$cache_list" ]]; then
+          echo "✅ No existing caches found or API unavailable. No cleanup needed."
+          exit 0
+        fi
+        
+        # Calculate current total repository cache size
+        total_size=0
+        cache_count=0
+        while IFS= read -r cache; do
+          if [[ -n "$cache" ]]; then
+            size=$(echo "$cache" | jq -r '.size_in_bytes // 0' 2>/dev/null || echo "0")
+            total_size=$((total_size + size))
+            cache_count=$((cache_count + 1))
+          fi
+        done <<< "$cache_list"
+        
+        # Calculate size limits
+        max_size_bytes=$((MAX_SIZE_GB * 1024 * 1024 * 1024))
+        threshold_bytes=$((max_size_bytes * CLEANUP_THRESHOLD / 100))
+        
+        echo "📊 Repository Cache Analysis:"
+        echo "  Total caches: $cache_count"
+        echo "  Current total size: $(format_bytes $total_size)"
+        echo "  Maximum allowed: $(format_bytes $max_size_bytes)"
+        echo "  Cleanup threshold (80%): $(format_bytes $threshold_bytes)"
+        echo ""
+        
+        # Determine if cleanup is needed (regardless of cache hit status)
+        cleanup_needed=false
+        cleanup_reason=""
+        
+        if [[ $total_size -gt $max_size_bytes ]]; then
+          cleanup_needed=true
+          cleanup_reason="repository cache size exceeds maximum limit"
+        elif [[ $total_size -gt $threshold_bytes ]]; then
+          cleanup_needed=true
+          cleanup_reason="repository cache size exceeds 80% threshold"
+        fi
+        
+        if [[ "$cleanup_needed" != "true" ]]; then
+          echo "✅ Repository cache size is healthy - $cleanup_reason"
+          exit 0
+        fi
+        
+        echo "🚨 Repository cleanup needed: $cleanup_reason"
+        
+        # Filter caches for cleanup (exclude current key to preserve it)
+        cleanup_candidates=$(echo "$cache_list" | jq -s --arg key "$CURRENT_KEY" \
+          'map(select(.key != $key))' 2>/dev/null || echo "[]")
+        
+        candidate_count=$(echo "$cleanup_candidates" | jq '. | length' 2>/dev/null || echo "0")
+        
+        if [[ $candidate_count -eq 0 ]]; then
+          echo "⚠️  No cleanup candidates found (all caches match current key)"
+          exit 0
+        fi
+        
+        # Sort candidates by LRU (Least Recently Used)
+        sorted_candidates=$(echo "$cleanup_candidates" | jq 'sort_by(.last_accessed_at // .created_at)' 2>/dev/null || echo "[]")
+        
+        echo "📋 Found $candidate_count cleanup candidates using LRU strategy"
+        
+        # Calculate how much space we need to free to get under threshold
+        space_needed=$((total_size - threshold_bytes))
+        if [[ $space_needed -lt 0 ]]; then
+          space_needed=0
+        fi
+        
+        echo "🎯 Target: Free at least $(format_bytes $space_needed) to get under 80% threshold"
+        
+        # Process deletions
+        space_freed=0
+        deleted_count=0
+        
+        # Create temporary file for cross-platform variable persistence
+        temp_dir="${RUNNER_TEMP:-/tmp}"
+        temp_file="$temp_dir/repo_cleanup_stats_$$"
+        echo "0,0" > "$temp_file"
+        
+        # Process each candidate
+        candidate_list=$(echo "$sorted_candidates" | jq -r '.[]? | @base64' 2>/dev/null || true)
+        
+        while IFS= read -r cache_b64; do
+          [[ -z "$cache_b64" ]] && continue
+          
+          # Read current stats from temp file
+          if [[ -f "$temp_file" ]]; then
+            current_stats=$(cat "$temp_file" 2>/dev/null || echo "0,0")
+            space_freed=$(echo "$current_stats" | cut -d',' -f1)
+            deleted_count=$(echo "$current_stats" | cut -d',' -f2)
+          fi
+          
+          if [[ $space_freed -ge $space_needed ]]; then
+            echo "✅ Repository cleanup goals met"
+            break
+          fi
+          
+          cache=$(decode_base64 "$cache_b64" || continue)
+          cache_id=$(echo "$cache" | jq -r '.id // empty' 2>/dev/null || continue)
+          key=$(echo "$cache" | jq -r '.key // empty' 2>/dev/null || continue)
+          size=$(echo "$cache" | jq -r '.size_in_bytes // 0' 2>/dev/null || echo "0")
+          last_accessed=$(echo "$cache" | jq -r '.last_accessed_at // .created_at // "unknown"' 2>/dev/null || echo "unknown")
+          
+          if [[ -z "$cache_id" || -z "$key" ]]; then
+            continue
+          fi
+          
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "  [DRY RUN] Would delete: $key ($(format_bytes $size), last accessed: $last_accessed)"
+            space_freed=$((space_freed + size))
+            deleted_count=$((deleted_count + 1))
+          else
+            echo "  🗑️ Deleting: $key ($(format_bytes $size), last accessed: $last_accessed)"
+            
+            if retry_gh_api gh api "repos/${{ github.repository }}/actions/caches/$cache_id" -X DELETE; then
+              echo "    ✅ Deleted successfully"
+              space_freed=$((space_freed + size))
+              deleted_count=$((deleted_count + 1))
+            else
+              echo "    ❌ Failed to delete cache $cache_id"
+            fi
+          fi
+          
+          # Write updated stats to temp file
+          echo "$space_freed,$deleted_count" > "$temp_file"
+          
+        done <<< "$candidate_list"
+        
+        # Read final stats from temp file
+        if [[ -f "$temp_file" ]]; then
+          final_stats=$(cat "$temp_file" 2>/dev/null || echo "0,0")
+          space_freed=$(echo "$final_stats" | cut -d',' -f1)
+          deleted_count=$(echo "$final_stats" | cut -d',' -f2)
+          rm -f "$temp_file" 2>/dev/null || true
+        fi
+        
+        # Update outputs
+        space_freed_mb=$((space_freed / 1024 / 1024))
+        if [[ $deleted_count -gt 0 ]]; then
+          echo "repo-cleanup-performed=true" >> "$GITHUB_OUTPUT"
+        fi
+        echo "repo-space-freed-mb=$space_freed_mb" >> "$GITHUB_OUTPUT"
+        
+        # Final status
+        final_size=$((total_size - space_freed))
+        
+        echo ""
+        if [[ "$DRY_RUN" == "true" ]]; then
+          echo "🔍 Repository cleanup dry run completed"
+          echo "  Would have freed: $(format_bytes $space_freed) from $deleted_count caches"
+          echo "  Repository size after cleanup: $(format_bytes $final_size)"
+        else
+          echo "✅ Repository cleanup completed!"
+          echo "  Deleted caches: $deleted_count"
+          echo "  Space freed: $(format_bytes $space_freed)"
+          echo "  New repository cache size: $(format_bytes $final_size)"
+          
+          if [[ $final_size -gt $max_size_bytes ]]; then
+            echo "⚠️  Warning: Repository cache size still exceeds limit"
+            echo "💡 Consider lowering max-cache-size or running more aggressive cleanup"
+          else
+            echo "✅ Repository cache size is now within limits"
+          fi
+        fi
+
     - name: Cache action
       id: cache
       if: steps.cache-strategy.outputs.cache-needed == 'true'
@@ -450,6 +701,14 @@ runs:
         echo "## 📦 Smart Cache Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
+        # Repository cleanup status (always show if performed)
+        if [[ "${{ steps.repo-cleanup.outputs.repo-cleanup-performed }}" == "true" ]]; then
+          echo "🏥 **Repository Cleanup Performed**" >> $GITHUB_STEP_SUMMARY
+          echo "- **Space Freed:** ${{ steps.repo-cleanup.outputs.repo-space-freed-mb }}MB using LRU strategy" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason:** Repository cache size exceeded limits" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+        
         if [[ "${{ steps.cache-strategy.outputs.cache-needed }}" == "true" ]]; then
           echo "✅ **Cache operation performed**" >> $GITHUB_STEP_SUMMARY
           echo "- **Key:** \`${{ inputs.key }}\`" >> $GITHUB_STEP_SUMMARY
@@ -460,9 +719,9 @@ runs:
           fi
           
           if [[ "${{ steps.cache-strategy.outputs.cache-exists }}" == "true" ]]; then
-            echo "- **Cache Status:** Restored existing cache (no cleanup needed)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Cache Status:** Restored existing cache" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ steps.pre-cleanup.outputs.cleanup-performed }}" == "true" ]]; then
-            echo "- **Pre-cleanup:** ✅ Freed ${{ steps.pre-cleanup.outputs.space-freed-mb }}MB using LRU strategy" >> $GITHUB_STEP_SUMMARY
+            echo "- **Pre-cleanup:** ✅ Freed ${{ steps.pre-cleanup.outputs.space-freed-mb }}MB for new cache" >> $GITHUB_STEP_SUMMARY
           fi
           
           if [[ -n "${{ steps.estimate-size.outputs.estimated-size-mb }}" ]]; then

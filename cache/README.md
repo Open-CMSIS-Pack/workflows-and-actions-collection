@@ -59,7 +59,7 @@ Replace your existing `actions/cache` steps:
 | `path` | Files, directories, and wildcard patterns to cache | ✅ Yes | |
 | `key` | Explicit key for restoring and saving the cache | ✅ Yes | |
 | `restore-keys` | Ordered list of prefix-matched keys to use for restoring stale cache | No | |
-| `max-cache-size-gb` | Maximum total cache size in GB before cleanup | No | `8` |
+| `max-cache-size` | Maximum total cache size in GB before cleanup | No | `8` |
 | `dry-run-cleanup` | Show what would be cleaned without actually deleting | No | `false` |
 | `lookup-only` | Check if cache exists without downloading | No | `false` |
 | `upload-chunk-size` | Chunk size for splitting large files during upload | No | |
