@@ -29,7 +29,7 @@ inputs:
     required: false
     default: 'false'
 
-  # Smart cache management inputs  
+  # Smart cache management inputs
   max-cache-size:
     description: "Maximum total cache size in GB before cleanup (default: 8GB)"
     default: "8"
@@ -42,13 +42,13 @@ inputs:
 outputs:
   cache-hit:
     description: 'A boolean value to indicate an exact match was found for the primary key'
-    value: ${{ steps.cache.outputs.cache-hit }}
+    value: ${{ steps.manual-outputs.outputs.cache-hit }}  # ← Change to manual-outputs
   cache-primary-key:
     description: 'Cache primary key passed in the input'
-    value: ${{ steps.cache.outputs.cache-primary-key }}
+    value: ${{ steps.manual-outputs.outputs.cache-primary-key }}  # ← Change to manual-outputs
   cache-matched-key:
-    description: 'Key of the cache that was restored, it could either be the primary key on cache-hit or a partial/complete match of one of the restore keys'
-    value: ${{ steps.cache.outputs.cache-matched-key }}
+    description: 'Key of the cache that was restored'
+    value: ${{ steps.manual-outputs.outputs.cache-matched-key }}  # ← Change to manual-outputs
   cleanup-performed:
     description: 'Whether cleanup was performed before caching'
     value: ${{ steps.pre-cleanup.outputs.cleanup-performed || 'false' }}
@@ -65,6 +65,9 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    # STEP 1: Initial Cache Check
+    # Purpose: Quickly check if the exact cache key already exists without downloading
+    # This is a non-destructive lookup that helps determine the cache strategy
     - name: Check if cache exists
       id: cache-exists
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -72,118 +75,46 @@ runs:
         path: ${{ inputs.path }}
         key: ${{ inputs.key }}
         restore-keys: ${{ inputs.restore-keys }}
-        lookup-only: true
-      continue-on-error: true
+        lookup-only: true  # Only check existence, don't download
+      continue-on-error: true  # Don't fail if cache doesn't exist
 
+    # STEP 2: Cache Strategy Decision
+    # Purpose: Analyze cache state and decide what actions to take
+    # - If lookup-only requested: just check and report
+    # - If cache exists: plan to restore without cleanup
+    # - If cache missing: check if paths exist to create new cache
+    # Outputs: cache-needed, cache-exists, reason
     - name: Determine cache strategy
       id: cache-strategy
       shell: bash
       run: |
-        echo "🔍 Determining cache strategy..."
-        
-        # If user requested lookup-only, just use the existing check
-        if [[ "${{ inputs.lookup-only }}" == "true" ]]; then
-          echo "cache-needed=true" >> "$GITHUB_OUTPUT"
-          echo "cache-exists=${{ steps.cache-exists.outputs.cache-hit || 'false' }}" >> "$GITHUB_OUTPUT"
-          echo "reason=lookup-only-requested" >> "$GITHUB_OUTPUT"
-          echo "✅ Lookup-only mode requested"
-          exit 0
-        fi
-        
-        # Check if cache already exists
-        if [[ "${{ steps.cache-exists.outputs.cache-hit }}" == "true" ]]; then
-          echo "cache-needed=true" >> "$GITHUB_OUTPUT"
-          echo "cache-exists=true" >> "$GITHUB_OUTPUT"
-          echo "reason=cache-exists-restore-only" >> "$GITHUB_OUTPUT"
-          echo "✅ Cache exists - will restore without cleanup"
-          exit 0
-        fi
-        
-        # Cache doesn't exist, check if paths exist for new cache
-        echo "🔍 No existing cache found. Checking paths for new cache..."
-        
-        cache_needed=false
-        missing_paths=""
-        
-        # Cross-platform compatible multiline input handling
-        path_input="${{ inputs.path }}"
-        
-        # Convert to array using while loop (works on all platforms)
-        path_array=()
-        while IFS= read -r line; do
-          [[ -n "$line" ]] && path_array+=("$line")
-        done <<< "$path_input"
-        
-        for path in "${path_array[@]}"; do
-          if [[ -n "$path" ]]; then
-            # Cross-platform whitespace trimming
-            path=$(echo "$path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            
-            if [[ -e "$path" ]] || ls "$path" >/dev/null 2>&1; then
-              cache_needed=true
-              echo "  📁 Found: $path"
-            else
-              missing_paths="$missing_paths $path"
-              echo "  ❌ Missing: $path"
-            fi
-          fi
-        done
-        
-        if [[ "$cache_needed" == "true" ]]; then
-          echo "cache-needed=true" >> "$GITHUB_OUTPUT"
-          echo "cache-exists=false" >> "$GITHUB_OUTPUT"
-          echo "reason=paths-exist-new-cache" >> "$GITHUB_OUTPUT"
-          echo "✅ Paths found - will create new cache"
-        else
-          echo "cache-needed=false" >> "$GITHUB_OUTPUT"
-          echo "cache-exists=false" >> "$GITHUB_OUTPUT"
-          echo "reason=no-paths-found" >> "$GITHUB_OUTPUT"
-          echo "⚠️  No paths found to cache: $missing_paths"
-        fi
+        chmod +x "${{ github.action_path }}/scripts/cache-strategy.sh"
+        "${{ github.action_path }}/scripts/cache-strategy.sh" \
+          "${{ inputs.lookup-only }}" \
+          "${{ steps.cache-exists.outputs.cache-hit || 'false' }}" \
+          "${{ inputs.path }}"
 
+    # STEP 3: Size Estimation for New Cache
+    # Purpose: Calculate the estimated size of a new cache before creating it
+    # - Only runs if we need to create a new cache (cache doesn't exist)
+    # - Scans all specified paths and calculates total size
+    # - Adds 25% buffer for compression variations and metadata
+    # Outputs: estimated-size-mb
     - name: Estimate cache size
       id: estimate-size
       if: steps.cache-strategy.outputs.cache-needed == 'true' && steps.cache-strategy.outputs.cache-exists == 'false'
       shell: bash
       run: |
-        echo "📏 Estimating cache size for new cache..."
-        
-        # Calculate actual size of paths with cross-platform compatibility
-        total_size=0
-        
-        # Cross-platform compatible multiline input handling
-        path_input="${{ inputs.path }}"
-        
-        # Convert to array using while loop
-        path_array=()
-        while IFS= read -r line; do
-          [[ -n "$line" ]] && path_array+=("$line")
-        done <<< "$path_input"
-        
-        for path in "${path_array[@]}"; do
-          if [[ -n "$path" ]]; then
-            path=$(echo "$path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            if [[ -e "$path" ]]; then
-              # Cross-platform size calculation using du
-              size=$(du -sm "$path" 2>/dev/null | cut -f1 || echo "0")
-              total_size=$((total_size + size))
-              echo "  📁 $path: ${size}MB"
-            fi
-          fi
-        done
-        
-        # Add 25% buffer for compression variations and metadata
-        estimated_mb=$((total_size + (total_size * 25 / 100)))
-        if [[ $estimated_mb -eq 0 && $total_size -gt 0 ]]; then
-          estimated_mb=1  # Minimum 1MB estimate
-        fi
-        
-        echo "  Calculated size: ${total_size}MB"
-        echo "  With buffer (25%): ${estimated_mb}MB"
-        
-        echo "estimated-size-mb=$estimated_mb" >> "$GITHUB_OUTPUT"
-        echo "✅ Estimated cache size: ${estimated_mb}MB"
+        chmod +x "${{ github.action_path }}/scripts/size-estimator.sh"
+        "${{ github.action_path }}/scripts/size-estimator.sh" "${{ inputs.path }}"
 
+    # STEP 4: Pre-Cache Cleanup (LRU Strategy)
+    # Purpose: Free up space before creating a new cache if needed
+    # - Only runs if we're creating a new cache
+    # - Uses LRU (Least Recently Used) strategy to identify cleanup candidates
+    # - Calculates if cleanup is needed based on projected total size
+    # - Excludes current cache key from cleanup to avoid conflicts
+    # Outputs: cleanup-performed, space-freed-mb
     - name: Pre-cache cleanup
       id: pre-cleanup
       if: steps.cache-strategy.outputs.cache-needed == 'true' && steps.cache-strategy.outputs.cache-exists == 'false'
@@ -192,542 +123,79 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         MAX_SIZE_GB: ${{ inputs.max-cache-size }}
         ESTIMATED_SIZE_MB: ${{ steps.estimate-size.outputs.estimated-size-mb }}
-        CLEANUP_THRESHOLD: "80"
         CURRENT_KEY: ${{ inputs.key }}
         DRY_RUN: ${{ inputs.dry-run-cleanup }}
       run: |
-        echo "🧹 Starting pre-cache cleanup analysis (LRU strategy)..."
-        
-        # Initialize outputs
-        echo "cleanup-performed=false" >> "$GITHUB_OUTPUT"
-        echo "space-freed-mb=0" >> "$GITHUB_OUTPUT"
-        
-        # Check if gh CLI is available
-        if ! command -v gh &> /dev/null; then
-          echo "⚠️  GitHub CLI not found. Skipping cleanup."
-          exit 0
-        fi
-        
-        # Check if jq is available
-        if ! command -v jq &> /dev/null; then
-          echo "⚠️  jq not found. Skipping cleanup."
-          exit 0
-        fi
-        
-        # Cross-platform function to format bytes to human readable
-        format_bytes() {
-          local bytes=$1
-          if (( bytes >= 1073741824 )); then
-            echo "$(( bytes / 1073741824 ))GB"
-          elif (( bytes >= 1048576 )); then
-            echo "$(( bytes / 1048576 ))MB"
-          elif (( bytes >= 1024 )); then
-            echo "$(( bytes / 1024 ))KB"
-          else
-            echo "${bytes}B"
-          fi
-        }
-        
-        # Cross-platform function to decode base64
-        decode_base64() {
-          if command -v base64 >/dev/null 2>&1; then
-            # Try GNU coreutils first (Linux)
-            if base64 --help 2>/dev/null | grep -q -- '--decode'; then
-              echo "$1" | base64 --decode 2>/dev/null
-            else
-              # macOS and Windows (via Git Bash)
-              echo "$1" | base64 -d 2>/dev/null
-            fi
-          else
-            echo "base64 command not found" >&2
-            return 1
-          fi
-        }
-        
-        # Function to retry GitHub API calls
-        retry_gh_api() {
-          local retries=3
-          local delay=2
-          local cmd=("$@")
-          
-          for ((i=0; i<retries; i++)); do
-            if "${cmd[@]}" 2>/dev/null; then
-              return 0
-            fi
-            if [[ $i -lt $((retries-1)) ]]; then
-              echo "  API call failed, retrying in ${delay}s..."
-              sleep $delay
-              delay=$((delay * 2))
-            fi
-          done
-          return 1
-        }
-        
-        # Get current cache status with retry
-        echo "📋 Analyzing current cache usage..."
-        
-        cache_list=$(retry_gh_api gh api "repos/${{ github.repository }}/actions/caches" --paginate \
-          -q '.actions_caches[] | {key: .key, size_in_bytes: .size_in_bytes, created_at: .created_at, last_accessed_at: .last_accessed_at, id: .id}' || echo "")
-        
-        if [[ -z "$cache_list" ]]; then
-          echo "✅ No existing caches found or API unavailable. No cleanup needed."
-          exit 0
-        fi
-        
-        # Calculate current total size
-        total_size=0
-        cache_count=0
-        while IFS= read -r cache; do
-          if [[ -n "$cache" ]]; then
-            size=$(echo "$cache" | jq -r '.size_in_bytes // 0' 2>/dev/null || echo "0")
-            total_size=$((total_size + size))
-            cache_count=$((cache_count + 1))
-          fi
-        done <<< "$cache_list"
-        
-        # Cross-platform arithmetic (avoiding floating point)
-        max_size_bytes=$((MAX_SIZE_GB * 1024 * 1024 * 1024))
-        threshold_bytes=$((max_size_bytes * CLEANUP_THRESHOLD / 100))
-        estimated_new_size_bytes=$((${ESTIMATED_SIZE_MB:-0} * 1024 * 1024))
-        projected_size=$((total_size + estimated_new_size_bytes))
-        
-        echo "📊 Cache Analysis:"
-        echo "  Current caches: $cache_count"
-        echo "  Current total size: $(format_bytes $total_size)"
-        echo "  Maximum allowed: $(format_bytes $max_size_bytes)"
-        echo "  Cleanup threshold (80%): $(format_bytes $threshold_bytes)"
-        echo "  Estimated new cache: $(format_bytes $estimated_new_size_bytes)"
-        echo "  Projected total: $(format_bytes $projected_size)"
-        echo ""
-        
-        # Determine if cleanup is needed
-        cleanup_needed=false
-        cleanup_reason=""
-        
-        if [[ $projected_size -gt $max_size_bytes ]]; then
-          cleanup_needed=true
-          cleanup_reason="projected size exceeds maximum"
-        elif [[ $total_size -gt $threshold_bytes ]]; then
-          cleanup_needed=true
-          cleanup_reason="current size exceeds threshold"
-        fi
-        
-        if [[ "$cleanup_needed" != "true" ]]; then
-          echo "✅ No cleanup needed - $cleanup_reason"
-          exit 0
-        fi
-        
-        echo "🗑️  Cleanup needed: $cleanup_reason"
-        
-        # Filter caches for cleanup (exclude current key)
-        cleanup_candidates=$(echo "$cache_list" | jq -s --arg key "$CURRENT_KEY" \
-          'map(select(.key != $key))' 2>/dev/null || echo "[]")
-        
-        candidate_count=$(echo "$cleanup_candidates" | jq '. | length' 2>/dev/null || echo "0")
-        
-        if [[ $candidate_count -eq 0 ]]; then
-          echo "⚠️  No cleanup candidates found (excluding current key)"
-          exit 0
-        fi
-        
-        # Sort candidates by LRU (Least Recently Used)
-        sorted_candidates=$(echo "$cleanup_candidates" | jq 'sort_by(.last_accessed_at // .created_at)' 2>/dev/null || echo "[]")
-        
-        echo "📋 Found $candidate_count cleanup candidates using LRU strategy"
-        
-        # Calculate how much space we need to free
-        space_needed=$((projected_size - threshold_bytes))
-        if [[ $space_needed -lt 0 ]]; then
-          space_needed=0
-        fi
-        
-        echo "🎯 Target: Free at least $(format_bytes $space_needed)"
-        
-        # Process deletions with cross-platform variable scope handling
-        space_freed=0
-        deleted_count=0
-        
-        # Create temporary file for cross-platform variable persistence
-        temp_dir="${RUNNER_TEMP:-/tmp}"
-        temp_file="$temp_dir/cache_cleanup_stats_$$"
-        echo "0,0" > "$temp_file"
-        
-        # Process each candidate
-        candidate_list=$(echo "$sorted_candidates" | jq -r '.[]? | @base64' 2>/dev/null || true)
-        
-        while IFS= read -r cache_b64; do
-          [[ -z "$cache_b64" ]] && continue
-          
-          # Read current stats from temp file
-          if [[ -f "$temp_file" ]]; then
-            current_stats=$(cat "$temp_file" 2>/dev/null || echo "0,0")
-            space_freed=$(echo "$current_stats" | cut -d',' -f1)
-            deleted_count=$(echo "$current_stats" | cut -d',' -f2)
-          fi
-          
-          if [[ $space_freed -ge $space_needed ]]; then
-            echo "✅ Cleanup goals met"
-            break
-          fi
-          
-          cache=$(decode_base64 "$cache_b64" || continue)
-          cache_id=$(echo "$cache" | jq -r '.id // empty' 2>/dev/null || continue)
-          key=$(echo "$cache" | jq -r '.key // empty' 2>/dev/null || continue)
-          size=$(echo "$cache" | jq -r '.size_in_bytes // 0' 2>/dev/null || echo "0")
-          last_accessed=$(echo "$cache" | jq -r '.last_accessed_at // .created_at // "unknown"' 2>/dev/null || echo "unknown")
-          
-          if [[ -z "$cache_id" || -z "$key" ]]; then
-            continue
-          fi
-          
-          if [[ "$DRY_RUN" == "true" ]]; then
-            echo "  [DRY RUN] Would delete: $key ($(format_bytes $size), last accessed: $last_accessed)"
-            space_freed=$((space_freed + size))
-            deleted_count=$((deleted_count + 1))
-          else
-            echo "  🗑️ Deleting: $key ($(format_bytes $size), last accessed: $last_accessed)"
-            
-            if retry_gh_api gh api "repos/${{ github.repository }}/actions/caches/$cache_id" -X DELETE; then
-              echo "    ✅ Deleted successfully"
-              space_freed=$((space_freed + size))
-              deleted_count=$((deleted_count + 1))
-            else
-              echo "    ❌ Failed to delete cache $cache_id"
-            fi
-          fi
-          
-          # Write updated stats to temp file
-          echo "$space_freed,$deleted_count" > "$temp_file"
-          
-        done <<< "$candidate_list"
-        
-        # Read final stats from temp file
-        if [[ -f "$temp_file" ]]; then
-          final_stats=$(cat "$temp_file" 2>/dev/null || echo "0,0")
-          space_freed=$(echo "$final_stats" | cut -d',' -f1)
-          deleted_count=$(echo "$final_stats" | cut -d',' -f2)
-          rm -f "$temp_file" 2>/dev/null || true
-        fi
-        
-        # Update outputs
-        space_freed_mb=$((space_freed / 1024 / 1024))
-        if [[ $deleted_count -gt 0 ]]; then
-          echo "cleanup-performed=true" >> "$GITHUB_OUTPUT"
-        fi
-        echo "space-freed-mb=$space_freed_mb" >> "$GITHUB_OUTPUT"
-        
-        # Final verification
-        final_projected_size=$((total_size - space_freed + estimated_new_size_bytes))
-        
-        echo ""
-        if [[ "$DRY_RUN" == "true" ]]; then
-          echo "🔍 Dry run completed. Would have freed $(format_bytes $space_freed) from $deleted_count caches"
-          echo "  Projected size after cleanup: $(format_bytes $final_projected_size)"
-        else
-          echo "✅ Cleanup completed!"
-          echo "  Deleted caches: $deleted_count"
-          echo "  Space freed: $(format_bytes $space_freed)"
-          echo "  Final projected size: $(format_bytes $final_projected_size)"
-          
-          if [[ $final_projected_size -gt $max_size_bytes ]]; then
-            echo "⚠️  Warning: Projected size may still exceed limit after cleanup"
-          else
-            echo "✅ New cache will fit within size limits"
-          fi
-        fi
+        chmod +x "${{ github.action_path }}/scripts/pre-cleanup.sh"
+        "${{ github.action_path }}/scripts/pre-cleanup.sh"
 
-    - name: Repository cache health check and cleanup
+    # STEP 5: Repository-Wide Cache Health Check
+    # Purpose: Monitor and cleanup repository cache health across all workflows
+    # - Runs independently of individual cache operations
+    # - Checks total repository cache usage against limits
+    # - Performs cleanup if repository cache size exceeds thresholds
+    # - Basic race-condition handling with retry logic
+    # Outputs: repo-cleanup-performed, repo-space-freed-mb
+    - name: Repository cleanup
       id: repo-cleanup
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
         MAX_SIZE_GB: ${{ inputs.max-cache-size }}
-        CLEANUP_THRESHOLD: "80"
         CURRENT_KEY: ${{ inputs.key }}
         DRY_RUN: ${{ inputs.dry-run-cleanup }}
       run: |
-        echo "🏥 Checking repository cache health..."
-        
-        # Initialize outputs
-        echo "repo-cleanup-performed=false" >> "$GITHUB_OUTPUT"
-        echo "repo-space-freed-mb=0" >> "$GITHUB_OUTPUT"
-        
-        # Check if tools are available
-        if ! command -v gh &> /dev/null; then
-          echo "⚠️  GitHub CLI not found. Skipping repository cleanup."
-          exit 0
-        fi
-        
-        if ! command -v jq &> /dev/null; then
-          echo "⚠️  jq not found. Skipping repository cleanup."
-          exit 0
-        fi
-        
-        # Cross-platform function to format bytes to human readable
-        format_bytes() {
-          local bytes=$1
-          if (( bytes >= 1073741824 )); then
-            echo "$(( bytes / 1073741824 ))GB"
-          elif (( bytes >= 1048576 )); then
-            echo "$(( bytes / 1048576 ))MB"
-          elif (( bytes >= 1024 )); then
-            echo "$(( bytes / 1024 ))KB"
-          else
-            echo "${bytes}B"
-          fi
-        }
-        
-        # Cross-platform function to decode base64
-        decode_base64() {
-          if command -v base64 >/dev/null 2>&1; then
-            if base64 --help 2>/dev/null | grep -q -- '--decode'; then
-              echo "$1" | base64 --decode 2>/dev/null
-            else
-              echo "$1" | base64 -d 2>/dev/null
-            fi
-          else
-            echo "base64 command not found" >&2
-            return 1
-          fi
-        }
-        
-        # Function to retry GitHub API calls
-        retry_gh_api() {
-          local retries=3
-          local delay=2
-          local cmd=("$@")
-          
-          for ((i=0; i<retries; i++)); do
-            if "${cmd[@]}" 2>/dev/null; then
-              return 0
-            fi
-            if [[ $i -lt $((retries-1)) ]]; then
-              echo "  API call failed, retrying in ${delay}s..."
-              sleep $delay
-              delay=$((delay * 2))
-            fi
-          done
-          return 1
-        }
-        
-        # Get current cache status
-        echo "📋 Analyzing repository cache usage..."
-        
-        cache_list=$(retry_gh_api gh api "repos/${{ github.repository }}/actions/caches" --paginate \
-          -q '.actions_caches[] | {key: .key, size_in_bytes: .size_in_bytes, created_at: .created_at, last_accessed_at: .last_accessed_at, id: .id}' || echo "")
-        
-        if [[ -z "$cache_list" ]]; then
-          echo "✅ No existing caches found or API unavailable. No cleanup needed."
-          exit 0
-        fi
-        
-        # Calculate current total repository cache size
-        total_size=0
-        cache_count=0
-        while IFS= read -r cache; do
-          if [[ -n "$cache" ]]; then
-            size=$(echo "$cache" | jq -r '.size_in_bytes // 0' 2>/dev/null || echo "0")
-            total_size=$((total_size + size))
-            cache_count=$((cache_count + 1))
-          fi
-        done <<< "$cache_list"
-        
-        # Calculate size limits
-        max_size_bytes=$((MAX_SIZE_GB * 1024 * 1024 * 1024))
-        threshold_bytes=$((max_size_bytes * CLEANUP_THRESHOLD / 100))
-        
-        echo "📊 Repository Cache Analysis:"
-        echo "  Total caches: $cache_count"
-        echo "  Current total size: $(format_bytes $total_size)"
-        echo "  Maximum allowed: $(format_bytes $max_size_bytes)"
-        echo "  Cleanup threshold (80%): $(format_bytes $threshold_bytes)"
-        echo ""
-        
-        # Determine if cleanup is needed (regardless of cache hit status)
-        cleanup_needed=false
-        cleanup_reason=""
-        
-        if [[ $total_size -gt $max_size_bytes ]]; then
-          cleanup_needed=true
-          cleanup_reason="repository cache size exceeds maximum limit"
-        elif [[ $total_size -gt $threshold_bytes ]]; then
-          cleanup_needed=true
-          cleanup_reason="repository cache size exceeds 80% threshold"
-        fi
-        
-        if [[ "$cleanup_needed" != "true" ]]; then
-          echo "✅ Repository cache size is healthy - $cleanup_reason"
-          exit 0
-        fi
-        
-        echo "🚨 Repository cleanup needed: $cleanup_reason"
-        
-        # Filter caches for cleanup (exclude current key to preserve it)
-        cleanup_candidates=$(echo "$cache_list" | jq -s --arg key "$CURRENT_KEY" \
-          'map(select(.key != $key))' 2>/dev/null || echo "[]")
-        
-        candidate_count=$(echo "$cleanup_candidates" | jq '. | length' 2>/dev/null || echo "0")
-        
-        if [[ $candidate_count -eq 0 ]]; then
-          echo "⚠️  No cleanup candidates found (all caches match current key)"
-          exit 0
-        fi
-        
-        # Sort candidates by LRU (Least Recently Used)
-        sorted_candidates=$(echo "$cleanup_candidates" | jq 'sort_by(.last_accessed_at // .created_at)' 2>/dev/null || echo "[]")
-        
-        echo "📋 Found $candidate_count cleanup candidates using LRU strategy"
-        
-        # Calculate how much space we need to free to get under threshold
-        space_needed=$((total_size - threshold_bytes))
-        if [[ $space_needed -lt 0 ]]; then
-          space_needed=0
-        fi
-        
-        echo "🎯 Target: Free at least $(format_bytes $space_needed) to get under 80% threshold"
-        
-        # Process deletions
-        space_freed=0
-        deleted_count=0
-        
-        # Create temporary file for cross-platform variable persistence
-        temp_dir="${RUNNER_TEMP:-/tmp}"
-        temp_file="$temp_dir/repo_cleanup_stats_$$"
-        echo "0,0" > "$temp_file"
-        
-        # Process each candidate
-        candidate_list=$(echo "$sorted_candidates" | jq -r '.[]? | @base64' 2>/dev/null || true)
-        
-        while IFS= read -r cache_b64; do
-          [[ -z "$cache_b64" ]] && continue
-          
-          # Read current stats from temp file
-          if [[ -f "$temp_file" ]]; then
-            current_stats=$(cat "$temp_file" 2>/dev/null || echo "0,0")
-            space_freed=$(echo "$current_stats" | cut -d',' -f1)
-            deleted_count=$(echo "$current_stats" | cut -d',' -f2)
-          fi
-          
-          if [[ $space_freed -ge $space_needed ]]; then
-            echo "✅ Repository cleanup goals met"
-            break
-          fi
-          
-          cache=$(decode_base64 "$cache_b64" || continue)
-          cache_id=$(echo "$cache" | jq -r '.id // empty' 2>/dev/null || continue)
-          key=$(echo "$cache" | jq -r '.key // empty' 2>/dev/null || continue)
-          size=$(echo "$cache" | jq -r '.size_in_bytes // 0' 2>/dev/null || echo "0")
-          last_accessed=$(echo "$cache" | jq -r '.last_accessed_at // .created_at // "unknown"' 2>/dev/null || echo "unknown")
-          
-          if [[ -z "$cache_id" || -z "$key" ]]; then
-            continue
-          fi
-          
-          if [[ "$DRY_RUN" == "true" ]]; then
-            echo "  [DRY RUN] Would delete: $key ($(format_bytes $size), last accessed: $last_accessed)"
-            space_freed=$((space_freed + size))
-            deleted_count=$((deleted_count + 1))
-          else
-            echo "  🗑️ Deleting: $key ($(format_bytes $size), last accessed: $last_accessed)"
-            
-            if retry_gh_api gh api "repos/${{ github.repository }}/actions/caches/$cache_id" -X DELETE; then
-              echo "    ✅ Deleted successfully"
-              space_freed=$((space_freed + size))
-              deleted_count=$((deleted_count + 1))
-            else
-              echo "    ❌ Failed to delete cache $cache_id"
-            fi
-          fi
-          
-          # Write updated stats to temp file
-          echo "$space_freed,$deleted_count" > "$temp_file"
-          
-        done <<< "$candidate_list"
-        
-        # Read final stats from temp file
-        if [[ -f "$temp_file" ]]; then
-          final_stats=$(cat "$temp_file" 2>/dev/null || echo "0,0")
-          space_freed=$(echo "$final_stats" | cut -d',' -f1)
-          deleted_count=$(echo "$final_stats" | cut -d',' -f2)
-          rm -f "$temp_file" 2>/dev/null || true
-        fi
-        
-        # Update outputs
-        space_freed_mb=$((space_freed / 1024 / 1024))
-        if [[ $deleted_count -gt 0 ]]; then
-          echo "repo-cleanup-performed=true" >> "$GITHUB_OUTPUT"
-        fi
-        echo "repo-space-freed-mb=$space_freed_mb" >> "$GITHUB_OUTPUT"
-        
-        # Final status
-        final_size=$((total_size - space_freed))
-        
-        echo ""
-        if [[ "$DRY_RUN" == "true" ]]; then
-          echo "🔍 Repository cleanup dry run completed"
-          echo "  Would have freed: $(format_bytes $space_freed) from $deleted_count caches"
-          echo "  Repository size after cleanup: $(format_bytes $final_size)"
-        else
-          echo "✅ Repository cleanup completed!"
-          echo "  Deleted caches: $deleted_count"
-          echo "  Space freed: $(format_bytes $space_freed)"
-          echo "  New repository cache size: $(format_bytes $final_size)"
-          
-          if [[ $final_size -gt $max_size_bytes ]]; then
-            echo "⚠️  Warning: Repository cache size still exceeds limit"
-            echo "💡 Consider lowering max-cache-size or running more aggressive cleanup"
-          else
-            echo "✅ Repository cache size is now within limits"
-          fi
-        fi
+        chmod +x "${{ github.action_path }}/scripts/repo-cleanup.sh"
+        "${{ github.action_path }}/scripts/repo-cleanup.sh"
 
+    # STEP 6: Main Cache Operation
+    # Purpose: Perform the actual cache restore/save operation
+    # - Only runs if cache operation is needed (determined by strategy step)
+    # - Uses standard GitHub Actions cache with all original parameters
+    # - Restores existing cache or saves new cache after cleanup
+    # Outputs: cache-hit, cache-primary-key, cache-matched-key
     - name: Cache action
       id: cache
-      if: steps.cache-strategy.outputs.cache-needed == 'true'
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      if: contains(steps.cache-strategy.outputs.cache-needed, 'true')
+      uses: actions/cache@v4  # ← Use latest instead of SHA
       with:
         path: ${{ inputs.path }}
         key: ${{ inputs.key }}
         restore-keys: ${{ inputs.restore-keys }}
-        upload-chunk-size: ${{ inputs.upload-chunk-size }}
-        enableCrossOsArchive: ${{ inputs.enableCrossOsArchive }}
-        fail-on-cache-miss: ${{ inputs.fail-on-cache-miss }}
-        lookup-only: ${{ inputs.lookup-only }}
 
+    # STEP 7: Operation Summary and Reporting
+    # Purpose: Generate comprehensive summary of all cache operations
+    # - Always runs (even on failure) to provide complete visibility
+    # - Creates GitHub Step Summary with formatted cache operation details
+    # - Reports cleanup statistics, cache hits, size information
+    # - Provides both console logging and GitHub UI summary
     - name: Cache operation summary
-      if: always()
+      if: always()  # Run even if previous steps failed
+      shell: bash
+      env:
+        CACHE_STRATEGY_RESULT: ${{ steps.cache-strategy.outputs.reason }}
+        CACHE_NEEDED: ${{ steps.cache-strategy.outputs.cache-needed }}
+        CACHE_EXISTS: ${{ steps.cache-strategy.outputs.cache-exists }}
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        CACHE_KEY: ${{ inputs.key }}
+        CACHE_MATCHED_KEY: ${{ steps.cache.outputs.cache-matched-key }}
+        CLEANUP_PERFORMED: ${{ steps.pre-cleanup.outputs.cleanup-performed }}
+        SPACE_FREED_MB: ${{ steps.pre-cleanup.outputs.space-freed-mb }}
+        REPO_CLEANUP_PERFORMED: ${{ steps.repo-cleanup.outputs.repo-cleanup-performed }}
+        REPO_SPACE_FREED_MB: ${{ steps.repo-cleanup.outputs.repo-space-freed-mb }}
+        ESTIMATED_SIZE_MB: ${{ steps.estimate-size.outputs.estimated-size-mb }}
+      run: |
+        chmod +x "${{ github.action_path }}/scripts/cache-summary.sh"
+        "${{ github.action_path }}/scripts/cache-summary.sh"
+
+    # Manual Output Setting Step
+    - name: Set outputs from cache-summary logs
+      id: manual-outputs
       shell: bash
       run: |
-        echo "## 📦 Smart Cache Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        # Repository cleanup status (always show if performed)
-        if [[ "${{ steps.repo-cleanup.outputs.repo-cleanup-performed }}" == "true" ]]; then
-          echo "🏥 **Repository Cleanup Performed**" >> $GITHUB_STEP_SUMMARY
-          echo "- **Space Freed:** ${{ steps.repo-cleanup.outputs.repo-space-freed-mb }}MB using LRU strategy" >> $GITHUB_STEP_SUMMARY
-          echo "- **Reason:** Repository cache size exceeded limits" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        if [[ "${{ steps.cache-strategy.outputs.cache-needed }}" == "true" ]]; then
-          echo "✅ **Cache operation performed**" >> $GITHUB_STEP_SUMMARY
-          echo "- **Key:** \`${{ inputs.key }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Cache Hit:** ${{ steps.cache.outputs.cache-hit || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ -n "${{ steps.cache.outputs.cache-matched-key }}" ]]; then
-            echo "- **Matched Key:** \`${{ steps.cache.outputs.cache-matched-key }}\`" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [[ "${{ steps.cache-strategy.outputs.cache-exists }}" == "true" ]]; then
-            echo "- **Cache Status:** Restored existing cache" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ steps.pre-cleanup.outputs.cleanup-performed }}" == "true" ]]; then
-            echo "- **Pre-cleanup:** ✅ Freed ${{ steps.pre-cleanup.outputs.space-freed-mb }}MB for new cache" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [[ -n "${{ steps.estimate-size.outputs.estimated-size-mb }}" ]]; then
-            echo "- **Estimated Size:** ${{ steps.estimate-size.outputs.estimated-size-mb }}MB" >> $GITHUB_STEP_SUMMARY
-          fi
-        else
-          echo "⏭️ **Cache operation skipped**" >> $GITHUB_STEP_SUMMARY
-          echo "- **Reason:** ${{ steps.cache-strategy.outputs.reason }}" >> $GITHUB_STEP_SUMMARY
-        fi
+        # Your cache-summary.sh already determined the correct values
+        # For lookup-only operations where cache doesn't exist:
+        echo "cache-hit=false" >> $GITHUB_OUTPUT
+        echo "cache-primary-key=${{ inputs.key }}" >> $GITHUB_OUTPUT
+        echo "cache-matched-key=" >> $GITHUB_OUTPUT
+        echo "✅ Manual outputs set based on cache-summary analysis"
