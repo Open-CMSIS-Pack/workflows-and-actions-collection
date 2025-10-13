@@ -1,0 +1,270 @@
+name: 'Cache Cleanup'
+
+on:
+  workflow_call:
+    inputs:
+      days-threshold:
+        description: 'Delete caches older than this many days'
+        required: false
+        default: '7'
+        type: string
+      dry-run:
+        description: 'Show what would be deleted without actually deleting'
+        required: false
+        default: false
+        type: boolean
+      repository:
+        description: 'Repository to clean (format: owner/repo). Defaults to current repo'
+        required: false
+        default: ''
+        type: string
+      cache-pattern:
+        description: 'Only delete caches matching this pattern (optional)'
+        required: false
+        default: ''
+        type: string
+    outputs:
+      caches-deleted:
+        description: 'Number of caches deleted'
+        value: ${{ jobs.cleanup-caches.outputs.caches-deleted }}
+      space-freed-mb:
+        description: 'Total space freed in MB'
+        value: ${{ jobs.cleanup-caches.outputs.space-freed-mb }}
+      summary:
+        description: 'Cleanup operation summary'
+        value: ${{ jobs.cleanup-caches.outputs.summary }}
+
+  workflow_dispatch:
+    inputs:
+      days-threshold:
+        description: 'Delete caches older than this many days'
+        required: false
+        default: '30'
+        type: string
+      dry-run:
+        description: 'Show what would be deleted without actually deleting'
+        required: false
+        default: false
+        type: boolean
+      repository:
+        description: 'Repository to clean (format: owner/repo). Defaults to current repo'
+        required: false
+        default: ''
+        type: string
+      cache-pattern:
+        description: 'Only delete caches matching this pattern (optional)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup-caches:
+    runs-on: ubuntu-latest
+    outputs:
+      caches-deleted: ${{ steps.cleanup.outputs.caches-deleted }}
+      space-freed-mb: ${{ steps.cleanup.outputs.space-freed-mb }}
+      summary: ${{ steps.cleanup.outputs.summary }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+
+      - name: Setup cleanup parameters
+        id: params
+        run: |
+          # Set repository (use current if not specified)
+          if [[ -n "${{ inputs.repository }}" ]]; then
+            REPO="${{ inputs.repository }}"
+          else
+            REPO="${{ github.repository }}"
+          fi
+
+          # Validate days threshold
+          DAYS="${{ inputs.days-threshold }}"
+          if ! [[ "$DAYS" =~ ^[0-9]+$ ]] || [[ "$DAYS" -lt 1 ]]; then
+            echo "❌ Invalid days-threshold: '$DAYS'. Must be a positive integer."
+            exit 1
+          fi
+
+          # Calculate cutoff date
+          CUTOFF_DATE=$(date -d "$DAYS days ago" --iso-8601=seconds)
+
+          echo "repository=$REPO" >> $GITHUB_OUTPUT
+          echo "days-threshold=$DAYS" >> $GITHUB_OUTPUT
+          echo "cutoff-date=$CUTOFF_DATE" >> $GITHUB_OUTPUT
+          echo "dry-run=${{ inputs.dry-run }}" >> $GITHUB_OUTPUT
+          echo "cache-pattern=${{ inputs.cache-pattern }}" >> $GITHUB_OUTPUT
+
+          echo "## Cache Cleanup Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** $REPO" >> $GITHUB_STEP_SUMMARY
+          echo "- **Days Threshold:** $DAYS days" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cutoff Date:** $CUTOFF_DATE" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry Run:** ${{ inputs.dry-run }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cache Pattern:** ${{ inputs.cache-pattern || 'All caches' }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cache cleanup
+        id: cleanup
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ steps.params.outputs.repository }}
+          DAYS_THRESHOLD: ${{ steps.params.outputs.days-threshold }}
+          CUTOFF_DATE: ${{ steps.params.outputs.cutoff-date }}
+          DRY_RUN: ${{ steps.params.outputs.dry-run }}
+          CACHE_PATTERN: ${{ steps.params.outputs.cache-pattern }}
+        run: |
+          #!/bin/bash
+          set -euo pipefail
+
+          echo "🧹 Starting cache cleanup for $REPOSITORY"
+          echo "📅 Deleting caches older than $DAYS_THRESHOLD days (before $CUTOFF_DATE)"
+
+          # Initialize counters
+          total_caches=0
+          deleted_caches=0
+          total_size_mb=0
+          freed_size_mb=0
+
+          # Function to convert size to MB
+          size_to_mb() {
+            local size_bytes=$1
+            echo $((size_bytes / 1024 / 1024))
+          }
+
+          # Function to check if cache matches pattern
+          matches_pattern() {
+            local cache_key=$1
+            if [[ -z "$CACHE_PATTERN" ]]; then
+              return 0  # No pattern means match all
+            fi
+            [[ "$cache_key" == *"$CACHE_PATTERN"* ]]
+          }
+
+          # Get all caches with pagination
+          page=1
+          per_page=100
+
+          echo "## 📋 Cache Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "| Cache Key | Created | Size | Action |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------|------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          while true; do
+            echo "📄 Fetching page $page..."
+
+            response=$(gh api \
+              "repos/$REPOSITORY/actions/caches" \
+              --method GET \
+              --field per_page=$per_page \
+              --field page=$page \
+              --jq '{
+                caches: [.actions_caches[] | {
+                  id: .id,
+                  key: .key,
+                  created_at: .created_at,
+                  size_in_bytes: .size_in_bytes,
+                  last_accessed_at: .last_accessed_at
+                }],
+                total_count: .total_count
+              }')
+
+            caches=$(echo "$response" | jq '.caches')
+            cache_count=$(echo "$caches" | jq length)
+
+            if [[ $cache_count -eq 0 ]]; then
+              echo "📭 No more caches found"
+              break
+            fi
+
+            echo "🔍 Processing $cache_count caches from page $page..."
+
+            for i in $(seq 0 $((cache_count - 1))); do
+              cache=$(echo "$caches" | jq ".[$i]")
+
+              cache_id=$(echo "$cache" | jq -r '.id')
+              cache_key=$(echo "$cache" | jq -r '.key')
+              created_at=$(echo "$cache" | jq -r '.created_at')
+              size_bytes=$(echo "$cache" | jq -r '.size_in_bytes')
+
+              total_caches=$((total_caches + 1))
+              cache_size_mb=$(size_to_mb $size_bytes)
+              total_size_mb=$((total_size_mb + cache_size_mb))
+
+              # Check if cache is older than threshold
+              if [[ "$created_at" < "$CUTOFF_DATE" ]] && matches_pattern "$cache_key"; then
+                action="🗑️ DELETE"
+                deleted_caches=$((deleted_caches + 1))
+                freed_size_mb=$((freed_size_mb + cache_size_mb))
+
+                if [[ "$DRY_RUN" == "false" ]]; then
+                  echo "🗑️ Deleting cache: $cache_key (ID: $cache_id)"
+                  if gh api "repos/$REPOSITORY/actions/caches/$cache_id" --method DELETE --silent; then
+                    action="✅ DELETED"
+                  else
+                    action="❌ FAILED"
+                    deleted_caches=$((deleted_caches - 1))
+                    freed_size_mb=$((freed_size_mb - cache_size_mb))
+                  fi
+                else
+                  action="🔍 WOULD DELETE"
+                fi
+              else
+                if [[ "$created_at" >= "$CUTOFF_DATE" ]]; then
+                  action="⏰ TOO RECENT"
+                elif ! matches_pattern "$cache_key"; then
+                  action="🎯 PATTERN MISMATCH"
+                else
+                  action="✅ KEEP"
+                fi
+              fi
+
+              # Add to summary table (limit to avoid huge tables)
+              if [[ $total_caches -le 50 ]]; then
+                echo "| \`${cache_key:0:40}${cache_key:40:1:+...}\` | ${created_at:0:10} | ${cache_size_mb}MB | $action |" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+
+            page=$((page + 1))
+
+            # Safety check to avoid infinite loops
+            if [[ $page -gt 100 ]]; then
+              echo "⚠️ Reached maximum page limit (100), stopping"
+              break
+            fi
+          done
+
+          # Generate summary
+          echo ""
+          echo "## 📊 Cleanup Summary"
+          echo "- **Total caches found:** $total_caches"
+          echo "- **Total cache size:** ${total_size_mb}MB"
+          echo "- **Caches processed:** $deleted_caches"
+          echo "- **Space freed:** ${freed_size_mb}MB"
+          echo "- **Operation mode:** $([ "$DRY_RUN" == "true" ] && echo "DRY RUN" || echo "LIVE")"
+
+          # Add summary to GitHub Step Summary
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Final Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Caches:** $total_caches (${total_size_mb}MB)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Processed:** $deleted_caches caches" >> $GITHUB_STEP_SUMMARY
+          echo "- **Space Freed:** ${freed_size_mb}MB" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode:** $([ "$DRY_RUN" == "true" ] && echo "🔍 DRY RUN" || echo "🗑️ LIVE CLEANUP")" >> $GITHUB_STEP_SUMMARY
+
+          if [[ $total_caches -gt 50 ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> **Note:** Only first 50 caches shown in table. Total: $total_caches caches processed." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Set outputs
+          echo "caches-deleted=$deleted_caches" >> $GITHUB_OUTPUT
+          echo "space-freed-mb=$freed_size_mb" >> $GITHUB_OUTPUT
+          echo "summary=Processed $deleted_caches of $total_caches caches, freed ${freed_size_mb}MB" >> $GITHUB_OUTPUT
+
+          if [[ "$DRY_RUN" == "false" && $deleted_caches -gt 0 ]]; then
+            echo "✅ Successfully deleted $deleted_caches caches and freed ${freed_size_mb}MB"
+          elif [[ "$DRY_RUN" == "true" ]]; then
+            echo "🔍 DRY RUN: Would delete $deleted_caches caches and free ${freed_size_mb}MB"
+          else
+            echo "ℹ️ No caches matched the deletion criteria"
+          fi

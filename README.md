@@ -11,6 +11,10 @@ standards, and streamline DevOps processes across repositories.
 | [`build-and-verify.yml`](.github/workflows/build-and-verify.yml) | Run standard quality and security checks, Build, Test Go binaries for selected OS/arch. |
 | [`markdown-lint.yml`](.github/workflows/markdown-lint.yml) | CI job for linting markdown files. |
 
+| Action | Description |
+|---------------|-------------|
+| [`cache`](./cache/README.md) | Cache that automatically clean up least-recently-used (LRU) caches before creating new ones. |
+
 <!-- markdownlint-enable MD013 -->
 
 ## Purpose

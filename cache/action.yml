@@ -1,0 +1,201 @@
+name: 'Smart Cache'
+description: 'Intelligent cache wrapper that manages space before creating new caches'
+author: 'ARM Software'
+
+inputs:
+  # Standard cache inputs (full compatibility)
+  path:
+    description: 'A list of files, directories, and wildcard patterns to cache and restore'
+    required: true
+  key:
+    description: 'An explicit key for restoring and saving the cache'
+    required: true
+  restore-keys:
+    description: 'An ordered list of keys to use for restoring stale cache if no cache hit occurred for key'
+    required: false
+  upload-chunk-size:
+    description: 'The chunk size used to split up large files during upload, in bytes'
+    required: false
+  enableCrossOsArchive:
+    description: 'An optional boolean when enabled, allows windows runners to save or restore caches that can be restored or saved respectively on other platforms'
+    required: false
+    default: 'false'
+  fail-on-cache-miss:
+    description: 'Fail the workflow if cache entry is not found'
+    required: false
+    default: 'false'
+  lookup-only:
+    description: 'Check if a cache entry exists for the given input(s) (key, restore-keys) without downloading the cache'
+    required: false
+    default: 'false'
+
+  # Smart cache management inputs
+  max-cache-size:
+    description: "Maximum total cache size in GB before cleanup (default: 8GB)"
+    default: "8"
+    required: false
+  dry-run-cleanup:
+    description: "If true, only show what would be cleaned without actually cleaning"
+    default: "false"
+    required: false
+
+outputs:
+  cache-hit:
+    description: 'A boolean value to indicate an exact match was found for the primary key'
+    value: ${{ steps.manual-outputs.outputs.cache-hit }}  # ← Change to manual-outputs
+  cache-primary-key:
+    description: 'Cache primary key passed in the input'
+    value: ${{ steps.manual-outputs.outputs.cache-primary-key }}  # ← Change to manual-outputs
+  cache-matched-key:
+    description: 'Key of the cache that was restored'
+    value: ${{ steps.manual-outputs.outputs.cache-matched-key }}  # ← Change to manual-outputs
+  cleanup-performed:
+    description: 'Whether cleanup was performed before caching'
+    value: ${{ steps.pre-cleanup.outputs.cleanup-performed || 'false' }}
+  space-freed-mb:
+    description: 'Amount of space freed during cleanup in MB'
+    value: ${{ steps.pre-cleanup.outputs.space-freed-mb || '0' }}
+  repo-cleanup-performed:
+    description: 'Whether repository-level cleanup was performed'
+    value: ${{ steps.repo-cleanup.outputs.repo-cleanup-performed || 'false' }}
+  repo-space-freed-mb:
+    description: 'Amount of space freed during repository cleanup in MB'
+    value: ${{ steps.repo-cleanup.outputs.repo-space-freed-mb || '0' }}
+
+runs:
+  using: 'composite'
+  steps:
+    # STEP 1: Initial Cache Check
+    # Purpose: Quickly check if the exact cache key already exists without downloading
+    # This is a non-destructive lookup that helps determine the cache strategy
+    - name: Check if cache exists
+      id: cache-exists
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}
+        restore-keys: ${{ inputs.restore-keys }}
+        lookup-only: true  # Only check existence, don't download
+      continue-on-error: true  # Don't fail if cache doesn't exist
+
+    # STEP 2: Cache Strategy Decision
+    # Purpose: Analyze cache state and decide what actions to take
+    # - If lookup-only requested: just check and report
+    # - If cache exists: plan to restore without cleanup
+    # - If cache missing: check if paths exist to create new cache
+    # Outputs: cache-needed, cache-exists, reason
+    - name: Determine cache strategy
+      id: cache-strategy
+      shell: bash
+      run: |
+        chmod +x "${{ github.action_path }}/scripts/cache-strategy.sh"
+        "${{ github.action_path }}/scripts/cache-strategy.sh" \
+          "${{ inputs.lookup-only }}" \
+          "${{ steps.cache-exists.outputs.cache-hit || 'false' }}" \
+          "${{ inputs.path }}"
+
+    # STEP 3: Size Estimation for New Cache
+    # Purpose: Calculate the estimated size of a new cache before creating it
+    # - Only runs if we need to create a new cache (cache doesn't exist)
+    # - Scans all specified paths and calculates total size
+    # - Adds 25% buffer for compression variations and metadata
+    # Outputs: estimated-size-mb
+    - name: Estimate cache size
+      id: estimate-size
+      if: steps.cache-strategy.outputs.cache-needed == 'true' && steps.cache-strategy.outputs.cache-exists == 'false'
+      shell: bash
+      run: |
+        chmod +x "${{ github.action_path }}/scripts/size-estimator.sh"
+        "${{ github.action_path }}/scripts/size-estimator.sh" "${{ inputs.path }}"
+
+    # STEP 4: Pre-Cache Cleanup (LRU Strategy)
+    # Purpose: Free up space before creating a new cache if needed
+    # - Only runs if we're creating a new cache
+    # - Uses LRU (Least Recently Used) strategy to identify cleanup candidates
+    # - Calculates if cleanup is needed based on projected total size
+    # - Excludes current cache key from cleanup to avoid conflicts
+    # Outputs: cleanup-performed, space-freed-mb
+    - name: Pre-cache cleanup
+      id: pre-cleanup
+      if: steps.cache-strategy.outputs.cache-needed == 'true' && steps.cache-strategy.outputs.cache-exists == 'false'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        MAX_SIZE_GB: ${{ inputs.max-cache-size }}
+        ESTIMATED_SIZE_MB: ${{ steps.estimate-size.outputs.estimated-size-mb }}
+        CURRENT_KEY: ${{ inputs.key }}
+        DRY_RUN: ${{ inputs.dry-run-cleanup }}
+      run: |
+        chmod +x "${{ github.action_path }}/scripts/pre-cleanup.sh"
+        "${{ github.action_path }}/scripts/pre-cleanup.sh"
+
+    # STEP 5: Repository-Wide Cache Health Check
+    # Purpose: Monitor and cleanup repository cache health across all workflows
+    # - Runs independently of individual cache operations
+    # - Checks total repository cache usage against limits
+    # - Performs cleanup if repository cache size exceeds thresholds
+    # - Basic race-condition handling with retry logic
+    # Outputs: repo-cleanup-performed, repo-space-freed-mb
+    - name: Repository cleanup
+      id: repo-cleanup
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        MAX_SIZE_GB: ${{ inputs.max-cache-size }}
+        CURRENT_KEY: ${{ inputs.key }}
+        DRY_RUN: ${{ inputs.dry-run-cleanup }}
+      run: |
+        chmod +x "${{ github.action_path }}/scripts/repo-cleanup.sh"
+        "${{ github.action_path }}/scripts/repo-cleanup.sh"
+
+    # STEP 6: Main Cache Operation
+    # Purpose: Perform the actual cache restore/save operation
+    # - Only runs if cache operation is needed (determined by strategy step)
+    # - Uses standard GitHub Actions cache with all original parameters
+    # - Restores existing cache or saves new cache after cleanup
+    # Outputs: cache-hit, cache-primary-key, cache-matched-key
+    - name: Cache action
+      id: cache
+      if: contains(steps.cache-strategy.outputs.cache-needed, 'true')
+      uses: actions/cache@v4  # ← Use latest instead of SHA
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}
+        restore-keys: ${{ inputs.restore-keys }}
+
+    # STEP 7: Operation Summary and Reporting
+    # Purpose: Generate comprehensive summary of all cache operations
+    # - Always runs (even on failure) to provide complete visibility
+    # - Creates GitHub Step Summary with formatted cache operation details
+    # - Reports cleanup statistics, cache hits, size information
+    # - Provides both console logging and GitHub UI summary
+    - name: Cache operation summary
+      if: always()  # Run even if previous steps failed
+      shell: bash
+      env:
+        CACHE_STRATEGY_RESULT: ${{ steps.cache-strategy.outputs.reason }}
+        CACHE_NEEDED: ${{ steps.cache-strategy.outputs.cache-needed }}
+        CACHE_EXISTS: ${{ steps.cache-strategy.outputs.cache-exists }}
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        CACHE_KEY: ${{ inputs.key }}
+        CACHE_MATCHED_KEY: ${{ steps.cache.outputs.cache-matched-key }}
+        CLEANUP_PERFORMED: ${{ steps.pre-cleanup.outputs.cleanup-performed }}
+        SPACE_FREED_MB: ${{ steps.pre-cleanup.outputs.space-freed-mb }}
+        REPO_CLEANUP_PERFORMED: ${{ steps.repo-cleanup.outputs.repo-cleanup-performed }}
+        REPO_SPACE_FREED_MB: ${{ steps.repo-cleanup.outputs.repo-space-freed-mb }}
+        ESTIMATED_SIZE_MB: ${{ steps.estimate-size.outputs.estimated-size-mb }}
+      run: |
+        chmod +x "${{ github.action_path }}/scripts/cache-summary.sh"
+        "${{ github.action_path }}/scripts/cache-summary.sh"
+
+    # Manual Output Setting Step
+    - name: Set outputs from cache-summary logs
+      id: manual-outputs
+      shell: bash
+      run: |
+        # Your cache-summary.sh already determined the correct values
+        # For lookup-only operations where cache doesn't exist:
+        echo "cache-hit=false" >> $GITHUB_OUTPUT
+        echo "cache-primary-key=${{ inputs.key }}" >> $GITHUB_OUTPUT
+        echo "cache-matched-key=" >> $GITHUB_OUTPUT
+        echo "✅ Manual outputs set based on cache-summary analysis"

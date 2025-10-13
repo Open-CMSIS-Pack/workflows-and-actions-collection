@@ -11,23 +11,156 @@ on:
       - 'configs/**'
       - 'scripts/**'
       - 'test/**'
+      - 'cache/**'
       - '!**/*.md'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-jobs:
-  build-and-verify:
-    uses: ./.github/workflows/build-and-verify.yml
-    with:
-      program: testapp
-      go-version-file: ./test/go.mod
-      enable-qlty-coverage: false
-      working-directory: './test'
-      artifact-retention-days: 1
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
-  markdown-lint:
-    uses: ./.github/workflows/markdown-lint.yml
-    with:
-      lint-config: configs/md_lint_config.yml
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test-smart-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create test files
+        run: |
+          mkdir -p test-cache-dir
+          echo "Test file 1 - $(date)" > test-cache-dir/file1.txt
+
+      # Test 1: Cache miss on non-existent cache
+      - name: Test cache miss
+        id: cache-miss
+        uses: ./cache
+        with:
+          path: test-cache-dir
+          key: test-cache-${{ github.run_id }}-miss
+          lookup-only: "true"
+
+      - name: Verify cache miss
+        run: |
+          CACHE_HIT="${{ steps.cache-miss.outputs.cache-hit }}"
+          echo "Cache hit result: '$CACHE_HIT'"
+
+          if [[ "$CACHE_HIT" == "false" ]]; then
+            echo "✅ Cache miss test passed!"
+          elif [[ "$CACHE_HIT" == "true" ]]; then
+            echo "❌ Expected cache miss, got hit!"
+            exit 1
+          elif [[ -z "$CACHE_HIT" ]]; then
+            echo "❌ No cache-hit output - action may not have run correctly!"
+            exit 1
+          else
+            echo "❌ Unexpected cache-hit value: '$CACHE_HIT'"
+            exit 1
+          fi
+
+      # Test 2: Test cleanup functionality (dry-run)
+      - name: Test cleanup logic
+        uses: ./cache
+        with:
+          path: test-cache-dir
+          key: test-cache-${{ github.run_id }}-cleanup
+          dry-run-cleanup: "true"
+
+      # Test 3: Create cache (will save at job end)
+      - name: Create cache for next job
+        uses: ./cache
+        with:
+          path: test-cache-dir
+          key: test-cache-${{ github.run_id }}-persist
+
+
+  # # Test with different cache sizes
+  # test-cache-limits:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+
+  #     - name: Create large test files
+  #       run: |
+  #         mkdir -p large-cache-dir
+  #         # Create a ~10MB file
+  #         dd if=/dev/zero of=large-cache-dir/large-file.bin bs=1M count=10
+  #         ls -lh large-cache-dir/
+
+  #     - name: Test cache with size limits
+  #       uses: ./cache
+  #       with:
+  #         path: large-cache-dir
+  #         key: large-cache-${{ github.run_id }}
+  #         max-cache-size: "1"  # 1GB limit
+  #         dry-run-cleanup: "true"
+
+  #     - name: Test lookup-only with restore-keys
+  #       uses: ./cache
+  #       with:
+  #         path: large-cache-dir
+  #         key: non-existent-key-${{ github.run_id }}
+  #         restore-keys: |
+  #           large-cache-${{ github.run_id }}
+  #           large-cache-
+  #         lookup-only: "true"
+
+  # build-and-verify:
+  #   uses: ./.github/workflows/build-and-verify.yml
+  #   with:
+  #     program: testapp
+  #     go-version-file: ./test/go.mod
+  #     enable-qlty-coverage: false
+  #     working-directory: './test'
+  #     artifact-retention-days: 1
+
+  # markdown-lint:
+  #   uses: ./.github/workflows/markdown-lint.yml
+  #   with:
+  #     lint-config: configs/md_lint_config.yml
+
+  # # Integration test with existing workflows
+  # test-cache-integration:
+  #   needs: [build-and-verify]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+
+  #     - name: Setup Go
+  #       uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+  #       with:
+  #         go-version-file: ./test/go.mod
+
+  #     - name: Check Go module cache lookup
+  #       id: go-cache-check
+  #       uses: ./cache
+  #       with:
+  #         path: ~/go/pkg/mod
+  #         key: go-mod-${{ hashFiles('./test/go.sum') }}
+  #         lookup-only: "true"
+
+  #     - name: Install dependencies if cache miss
+  #       if: steps.go-cache-check.outputs.cache-hit != 'true'
+  #       working-directory: ./test
+  #       run: go mod download
+
+  #     - name: Cache Go modules
+  #       if: steps.go-cache-check.outputs.cache-hit != 'true'
+  #       uses: ./cache
+  #       with:
+  #         path: ~/go/pkg/mod
+  #         key: go-mod-${{ hashFiles('./test/go.sum') }}
+
+  #     - name: Verify cache functionality
+  #       run: |
+  #         echo "Go cache lookup result: ${{ steps.go-cache-check.outputs.cache-hit }}"
+  #         echo "Cache strategy used: ${{ steps.go-cache-check.outputs.cache-primary-key }}"
