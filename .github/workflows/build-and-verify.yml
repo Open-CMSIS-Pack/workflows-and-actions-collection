@@ -144,7 +144,7 @@ jobs:
           make OS=${{ matrix.goos }} ARCH=${{ matrix.arch }} build
 
       - name: Upload binary
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ${{ inputs.program }}-${{ matrix.goos }}-${{ matrix.arch }}
           path: ${{ needs.configure-ci.outputs.working-dir }}/build/${{ inputs.program }}*
@@ -212,7 +212,7 @@ jobs:
             -out build/${{ inputs.program }}-testreport-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.xml
 
       - name: Archive test results
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: test-results-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}
           path: ${{ needs.configure-ci.outputs.working-dir }}/build/${{ inputs.program }}-testreport-*.xml
@@ -255,7 +255,7 @@ jobs:
             --output_file test_report.html
 
       - name: Upload HTML report as artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: html-test-report
           path: test_report.html
