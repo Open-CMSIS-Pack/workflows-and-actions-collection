@@ -200,7 +200,9 @@ jobs:
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
         run: |
           mkdir -p build
-          make test > build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt
+          echo "::group::Running tests for ${{ matrix.platform }} (${{ matrix.arch }})"
+          make test 2>&1 | tee build/${{ inputs.program }}-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.txt
+          echo "::endgroup::"
 
       - name: Generate JUnit report
         if: always()
