@@ -120,17 +120,16 @@ jobs:
           config-file: ${{ steps.link-config-path.outputs.config_path }}
 
       - name: Check Links
-        uses: lycheeverse/lychee-action@v2
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
         with:
           fail: true
           format: markdown
           output: link-check-report.md
 
-      - name: Show link checker report
+      - name: Archive link checker results
         if: failure()
-        run: |
-          {
-            echo "## Link checker report"
-            echo
-            cat link-check-report.md
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: link-check-results
+          path: link-check-report.md
+          if-no-files-found: error
