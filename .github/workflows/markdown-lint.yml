@@ -118,3 +118,19 @@ jobs:
           use-quiet-mode: 'no'
           use-verbose-mode: 'yes'
           config-file: ${{ steps.link-config-path.outputs.config_path }}
+
+      - name: Check Links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          fail: true
+          format: markdown
+          output: link-check-report.md
+
+      - name: Show link checker report
+        if: failure()
+        run: |
+          {
+            echo "## Link checker report"
+            echo
+            cat link-check-report.md
+          } >> "$GITHUB_STEP_SUMMARY"

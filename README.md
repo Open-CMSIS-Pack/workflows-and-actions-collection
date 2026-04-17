@@ -8,7 +8,7 @@ standards, and streamline DevOps processes across repositories.
 
 | Workflow File | Description |
 |---------------|-------------|
-| [`build-and-verify.yml`](.github/workflows/build-and-verify.yml) | Run standard quality and security checks, Build, Test Go binaries for selected OS/arch. |
+| [`build-and-verify.yml`](.github/workflows/wrong_build-and-verify.yml) | Run standard quality and security checks, Build, Test Go binaries for selected OS/arch. |
 | [`markdown-lint.yml`](.github/workflows/markdown-lint.yml) | CI job for linting markdown files. |
 
 <!-- markdownlint-enable MD013 -->
