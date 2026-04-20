@@ -8,11 +8,6 @@ on:
         required: false
         default: 'configs/md_lint_config.yml'
         description: Path to markdownlint config file (JSON, JSONC, or YML).
-      link-check-config:
-        type: string
-        required: false
-        default: 'configs/mlc_config.json'
-        description: Path to markdown link check config file (JSON).
       ignore-files:
         type: string
         required: false
@@ -98,23 +93,17 @@ jobs:
           repository: ${{ github.event.repository.full_name }}
           path: ${{ env.CALLER_DIR }}
 
-      - name: Determine link check config path
-        id: link-config-path
-        run: |
-          link_cfg='${{ inputs.link-check-config }}'
-          workflow_dir='${{ env.WORKFLOW_DIR }}'
-          caller_dir='${{ env.CALLER_DIR }}'
-
-          if [ "$link_cfg" = "configs/mlc_config.json" ]; then
-            config_path="$workflow_dir/$link_cfg"
-          else
-            config_path="$caller_dir/$link_cfg"
-          fi
-          printf 'config_path=%s\n' "$config_path" >> "$GITHUB_OUTPUT"
-
-      - name: Check markdown links
-        uses: tcort/github-action-markdown-link-check@e7c7a18363c842693fadde5d41a3bd3573a7a225 # v1.1.2
+      - name: Check Links
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
         with:
-          use-quiet-mode: 'no'
-          use-verbose-mode: 'yes'
-          config-file: ${{ steps.link-config-path.outputs.config_path }}
+          fail: true
+          format: markdown
+          output: link-check-report.md
+
+      - name: Archive link checker results
+        if: failure()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: link-check-results
+          path: link-check-report.md
+          if-no-files-found: error
