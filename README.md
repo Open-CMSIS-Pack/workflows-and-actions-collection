@@ -20,6 +20,7 @@ Centralize GitHub automation patterns for:
 - Workflows and CI/CD practices adopted by Open-CMSIS-Pack
 - Serve as a central index of common reusable scripts/configs/workflows usage
 - https://developer.arm.com/GetEula?Id=15d9660a-2059-4985-85e9-c01cdd4b1ba0
+- https://developer.arm.com/documentation/SDEN1068427/latest/
 
 This helps maintain consistent best practices across repositories and reduces
 duplication.
