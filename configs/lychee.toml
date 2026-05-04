@@ -28,7 +28,7 @@ scheme = ["http", "https", "file"]
 
 # Exclude links
 exclude = [
-  # Exclude links as cookies needed to be accepted
+  # Exclude links that require accepting cookies
   'https://developer.arm.com',
   'http://www.keil.com/pack'
 ]
