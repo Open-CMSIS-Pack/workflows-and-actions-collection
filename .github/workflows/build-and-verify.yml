@@ -83,6 +83,7 @@ jobs:
         with:
           go-version-file: ${{ inputs.go-version-file }}
           check-latest: true
+          cache: false
 
       - name: Lint
         uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
@@ -95,10 +96,13 @@ jobs:
         run: make format-check
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
 
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.26.1
+
       - name: Gosec Security Scanner
-        uses: securego/gosec@4a3bd8af174872c778439083ded7adbf3747e770 # v2.26.1
-        with:
-          args: '-severity high -exclude-dir=testdata -exclude=*_test.go ${{ needs.configure-ci.outputs.working-dir }}/...'
+        working-directory: ${{ needs.configure-ci.outputs.working-dir }}
+        run: |
+          "$(go env GOPATH)/bin/gosec" -severity high -exclude-dir=testdata -exclude=*_test.go ./...
 
       - name: Vulnerability Scan
         uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
