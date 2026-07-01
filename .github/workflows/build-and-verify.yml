@@ -118,7 +118,7 @@ jobs:
       fail-fast: false
       # If the caller didn't pass a build-matrix, use defaults for tri-OS and dual-arch.
       matrix:
-        include: ${{ fromJson(inputs.build-matrix != '' && inputs.build-matrix || '[{"goos":"windows","arch":"amd64"},{"goos":"windows","arch":"arm64"},{"goos":"linux","arch":"amd64"},{"goos":"linux","arch":"arm64"},{"goos":"darwin","arch":"amd64"},{"goos":"darwin","arch":"arm64"}]') }}
+        include: ${{ fromJson(inputs.build-matrix != '' && inputs.build-matrix || '[{"goos":"windows","arch":"amd64"},{"goos":"windows","arch":"arm64"},{"goos":"linux","arch":"amd64"},{"goos":"linux","arch":"arm64"},{"goos":"darwin","arch":"arm64"}]') }}
 
     steps:
       - name: Harden Runner
@@ -158,7 +158,7 @@ jobs:
       fail-fast: false
       # If the caller didn't pass a test-matrix, use defaults for tri-OS and dual-arch.
       matrix:
-        include: ${{ fromJson(inputs.test-matrix != '' && inputs.test-matrix || '[{"platform":"windows-2022","arch":"amd64"},{"platform":"windows-2022","arch":"arm64"},{"platform":"ubuntu-24.04","arch":"amd64"},{"platform":"ubuntu-24.04","arch":"arm64"},{"platform":"macos-14","arch":"amd64"},{"platform":"macos-14","arch":"arm64"}]') }}
+        include: ${{ fromJson(inputs.test-matrix != '' && inputs.test-matrix || '[{"platform":"windows-2022","arch":"amd64"},{"platform":"windows-2022","arch":"arm64"},{"platform":"ubuntu-24.04","arch":"amd64"},{"platform":"ubuntu-24.04","arch":"arm64"},{"platform":"macos-14","arch":"arm64"}]') }}
 
     runs-on: ${{ matrix.platform }}
     steps:

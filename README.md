@@ -66,7 +66,6 @@ If no custom matrix is provided, the workflow uses the following defaults:
     {"goos":"windows","arch":"arm64"},
     {"goos":"linux","arch":"amd64"},
     {"goos":"linux","arch":"arm64"},
-    {"goos":"darwin","arch":"amd64"},
     {"goos":"darwin","arch":"arm64"}
   ]
   ```
@@ -79,7 +78,6 @@ If no custom matrix is provided, the workflow uses the following defaults:
     {"platform":"windows-2022","arch":"arm64"},
     {"platform":"ubuntu-24.04","arch":"amd64"},
     {"platform":"ubuntu-24.04","arch":"arm64"},
-    {"platform":"macos-14","arch":"amd64"},
     {"platform":"macos-14","arch":"arm64"}
   ]
   ```
