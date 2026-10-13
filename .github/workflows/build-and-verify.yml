@@ -96,7 +96,7 @@ jobs:
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
 
       - name: Gosec Security Scanner
-        uses: securego/gosec@57f161386e11e13e4c8a37255bc1a6502993d079 # v2.29.0
+        uses: securego/gosec@71577268350e1e0f2f1491de1ef53f1227b43c1f # v2.29.0
         with:
           args: '-severity high -exclude-dir=testdata -exclude=*_test.go ${{ needs.configure-ci.outputs.working-dir }}/...'
 
