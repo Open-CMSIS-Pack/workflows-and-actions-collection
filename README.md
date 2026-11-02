@@ -41,7 +41,7 @@ build:
   with:
     program: 'cbridge' # Name of the binary to build
     build-matrix: '[{"goos":"linux","arch":"amd64"},{"goos":"windows","arch":"arm64"}]'
-    test-matrix: '[{"platform":"ubuntu-24.04","arch":"amd64"},{"platform":"macos-14","arch":"arm64"}]'
+    test-matrix: '[{"platform":"ubuntu-24.04","arch":"amd64"},{"platform":"macos-15","arch":"arm64"}]'
     go-version-file: ./go.mod # Path to go.mod file for Go version detection
 ```
 
@@ -78,7 +78,7 @@ If no custom matrix is provided, the workflow uses the following defaults:
     {"platform":"windows-2022","arch":"arm64"},
     {"platform":"ubuntu-24.04","arch":"amd64"},
     {"platform":"ubuntu-24.04","arch":"arm64"},
-    {"platform":"macos-14","arch":"arm64"}
+    {"platform":"macos-15","arch":"arm64"}
   ]
   ```
 
