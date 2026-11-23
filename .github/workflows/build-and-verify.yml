@@ -69,24 +69,23 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout caller repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.repository.full_name }}
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
           check-latest: true
-          cache: false
 
       - name: Lint
-        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: latest
           skip-cache: true
@@ -96,8 +95,9 @@ jobs:
         run: make format-check
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
 
+      # Keep this revision updated manually; Dependabot does not track go install commands.
       - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.26.1
+        run: go install github.com/securego/gosec/v2/cmd/gosec@244f1f6f4d1d0d14f89e79a73dab1219eabb5228
 
       - name: Gosec Security Scanner
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
@@ -105,7 +105,7 @@ jobs:
           "$(go env GOPATH)/bin/gosec" -severity high -exclude-dir=testdata -exclude=*_test.go ./...
 
       - name: Vulnerability Scan
-        uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
           check-latest: true
@@ -122,22 +122,22 @@ jobs:
       fail-fast: false
       # If the caller didn't pass a build-matrix, use defaults for tri-OS and dual-arch.
       matrix:
-        include: ${{ fromJson(inputs.build-matrix != '' && inputs.build-matrix || '[{"goos":"windows","arch":"amd64"},{"goos":"windows","arch":"arm64"},{"goos":"linux","arch":"amd64"},{"goos":"linux","arch":"arm64"},{"goos":"darwin","arch":"amd64"},{"goos":"darwin","arch":"arm64"}]') }}
+        include: ${{ fromJson(inputs.build-matrix != '' && inputs.build-matrix || '[{"goos":"windows","arch":"amd64"},{"goos":"windows","arch":"arm64"},{"goos":"linux","arch":"amd64"},{"goos":"linux","arch":"arm64"},{"goos":"darwin","arch":"arm64"}]') }}
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
           check-latest: true
@@ -149,7 +149,7 @@ jobs:
           make OS=${{ matrix.goos }} ARCH=${{ matrix.arch }} build
 
       - name: Upload binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.program }}-${{ matrix.goos }}-${{ matrix.arch }}
           path: ${{ needs.configure-ci.outputs.working-dir }}/build/${{ inputs.program }}*
@@ -162,23 +162,23 @@ jobs:
       fail-fast: false
       # If the caller didn't pass a test-matrix, use defaults for tri-OS and dual-arch.
       matrix:
-        include: ${{ fromJson(inputs.test-matrix != '' && inputs.test-matrix || '[{"platform":"windows-2022","arch":"amd64"},{"platform":"windows-2022","arch":"arm64"},{"platform":"ubuntu-24.04","arch":"amd64"},{"platform":"ubuntu-24.04","arch":"arm64"},{"platform":"macos-14","arch":"amd64"},{"platform":"macos-14","arch":"arm64"}]') }}
+        include: ${{ fromJson(inputs.test-matrix != '' && inputs.test-matrix || '[{"platform":"windows-2022","arch":"amd64"},{"platform":"windows-2022","arch":"arm64"},{"platform":"ubuntu-24.04","arch":"amd64"},{"platform":"ubuntu-24.04","arch":"arm64"},{"platform":"macos-15","arch":"arm64"}]') }}
 
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
           check-latest: true
@@ -219,7 +219,7 @@ jobs:
             -out build/${{ inputs.program }}-testreport-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}.xml
 
       - name: Archive test results
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-results-${{ steps.get-target.outputs.target }}-${{ matrix.arch }}
           path: ${{ needs.configure-ci.outputs.working-dir }}/build/${{ inputs.program }}-testreport-*.xml
@@ -232,17 +232,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Open-CMSIS-Pack/workflows-and-actions-collection
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.11'
 
       - name: Download test results
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts/
 
@@ -262,7 +262,7 @@ jobs:
             --output_file test_report.html
 
       - name: Upload HTML report as artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: html-test-report
           path: test_report.html
@@ -274,18 +274,18 @@ jobs:
     if: inputs.enable-qlty-coverage == true
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
           check-latest: true
@@ -311,7 +311,7 @@ jobs:
           fi
 
       - name: Publish coverage report to QLTY
-        uses: qltysh/qlty-action/coverage@a19242102d17e497f437d7466aa01b528537e899 # v1
+        uses: qltysh/qlty-action/coverage@357cd88be7c73c5dc45cf7cf8f99a46ec0b62b73 # v1
         with:
           token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
           files: '${{ needs.configure-ci.outputs.working-dir }}/**/cover.out'

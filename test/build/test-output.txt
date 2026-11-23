@@ -1,0 +1,4 @@
+=== RUN   TestMain
+--- PASS: TestMain (0.00s)
+PASS
+ok  	github.com/open-cmsis-pack/sample	0.002s
