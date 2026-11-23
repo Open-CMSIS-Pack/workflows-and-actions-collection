@@ -69,7 +69,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
@@ -96,7 +96,7 @@ jobs:
         working-directory: ${{ needs.configure-ci.outputs.working-dir }}
 
       - name: Gosec Security Scanner
-        uses: securego/gosec@de05e72e1756ec5a5bfba6814d6dc36f20fd4b54 # v2.29.0
+        uses: securego/gosec@244f1f6f4d1d0d14f89e79a73dab1219eabb5228 # v2.29.0
         with:
           args: '-severity high -exclude-dir=testdata -exclude=*_test.go ${{ needs.configure-ci.outputs.working-dir }}/...'
 
@@ -122,7 +122,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
@@ -163,7 +163,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
@@ -270,7 +270,7 @@ jobs:
     if: inputs.enable-qlty-coverage == true
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
@@ -307,7 +307,7 @@ jobs:
           fi
 
       - name: Publish coverage report to QLTY
-        uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v1
+        uses: qltysh/qlty-action/coverage@357cd88be7c73c5dc45cf7cf8f99a46ec0b62b73 # v1
         with:
           token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
           files: '${{ needs.configure-ci.outputs.working-dir }}/**/cover.out'
